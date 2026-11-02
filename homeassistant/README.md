@@ -1,8 +1,17 @@
-# homeassistant/ (planned, P2)
+# homeassistant/ (`:homeassistant`, Kotlin/JVM)
 
-Home Assistant client: REST (`/api/`, `/api/states`, `/api/services/{domain}/{service}`) and WebSocket
-(`/api/websocket`: auth, get_states, subscribe_events / subscribe_entities, call_service), automatic reconnect with
-re-subscribe, local entity cache. **Never replays pending commands after reconnect.**
+Home Assistant client used by the Android app. No Android and no `com.rokid.*` dependencies.
 
-Must not depend on any `com.rokid.*` class. Not implemented until P0 CustomView is verified on the device.
-See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) §5.1.
+| Package | Content |
+| --- | --- |
+| `config` | `HaServerUrl` (URL normalisation, https-for-remote policy, no downgrade), `AccessToken` (redacted `toString`), `HaConfig` |
+| `rest` | `HaRestClient`: `/api/`, `/api/config`, `/api/states`, `/api/states/{id}`, `/api/services/{domain}/{service}` |
+| `ws` | `HaWebSocketConnector` / `HaWsSession`: auth, commands, `subscribe_events` |
+| `connection` | `HaConnectionManager` (reconnect + backoff, entity cache, areas, notifications, no command replay), `Backoff` |
+| `setup` | `HaConnectionTester` (REST + WebSocket validation before saving) |
+| `discovery` | `HaDiscovery` port, `ZeroconfParser` for `_home-assistant._tcp` TXT records |
+| `credentials` | `CredentialStore` over `SecretCipher` + `KeyValueStore` ports (Android implementations in `:data`) |
+| `selection` | `GlassesSelection`, `ServiceCatalog`, `ServiceCallGuard` (allowlist), `SelectionStore` |
+| `notifications` | `HaNotification` (priority parsing from the notification helper entity) |
+
+Tests: `src/test` against `FakeHomeAssistant` (`src/testFixtures`, MockWebServer REST + WebSocket). Run `./gradlew :homeassistant:test`.

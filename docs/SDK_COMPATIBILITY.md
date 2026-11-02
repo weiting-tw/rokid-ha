@@ -86,6 +86,23 @@
 
 ---
 
+## 3a. Home Assistant 整合功能的硬體相依狀態（2026-11-02 新增）
+
+本節使用 VERIFIED / DOCUMENTED / EXPERIMENTAL / **UNKNOWN**（無文件也未測試）。手機端 HA 邏輯以自動化測試涵蓋，但那不是眼鏡實機驗證。
+
+| 功能 | 狀態 | 說明 |
+| --- | --- | --- |
+| 眼鏡鏈路就緒後自動開啟 Dashboard | DOCUMENTED | 依 `customViewOpen` / `onCustomViewOpened`；邏輯以假眼鏡測試 |
+| 狀態變化即時更新（只送變更行） | DOCUMENTED | `customViewUpdate`；更新頻率上限未知（V-12b），bridge 預設最小間隔 500 ms |
+| 8 行文字 Dashboard 的可讀性 / 可視區域 | UNKNOWN | 行數、字級、中文顯示待 V-11 |
+| 在眼鏡上顯示 HA 通知 | DOCUMENTED | 以 Dashboard 的一行文字呈現（無彈窗能力） |
+| 從眼鏡本身觸發控制 | UNSUPPORTED（CustomView） | CustomView 無輸入事件；控制在手機上執行。眼鏡按鍵需 CXR-S CustomApp（DOCUMENTED，未實作） |
+| 眼鏡掃描 QR Code | UNKNOWN | CXR-L 只有 `takePhoto`，無 QR 解碼；未實作也未計畫 |
+| App 重啟後無需使用者操作即重新連上眼鏡 | UNKNOWN | Rokid token 只存記憶體；授權「可能同步返回」為 DOCUMENTED，未驗證 |
+| 前景服務期間 CXR-L 連結在背景保持 | UNKNOWN | 取決於 Rokid AI App / Hi Rokid 背景行為 |
+| HA token 不會傳到眼鏡 | 以設計 + 自動化測試保證 | Bridge 型別上拿不到 token；`GlassesCredentialIsolationTest` 檢查所有送往眼鏡的文字 |
+| mDNS 自動發現 | UNKNOWN（實網） | NsdManager 實作；TXT 解析有單元測試；VLAN / 隔離 Wi-Fi / VPN 下預期找不到 |
+
 ## 4. 實機驗證紀錄
 
 每次實機測試新增一列。使用 P0 App 的「Copy report」把報告貼到 `docs/device-runs/YYYY-MM-DD-<n>.md`，並在此填表。

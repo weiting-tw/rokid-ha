@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext (http/ws) must be allowed at platform level because local Home Assistant instances
+  are commonly http://<LAN IP>:8123 and Android's config cannot express IP ranges.
+  The real policy is enforced in code by HaServerUrl: http is accepted ONLY for local/private
+  hosts; remote hosts require https, and there is never an automatic https -> http fallback.
+  User-installed CAs are not trusted (system CAs only).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

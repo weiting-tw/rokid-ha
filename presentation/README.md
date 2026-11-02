@@ -1,13 +1,15 @@
-# presentation/ (planned, P1)
+# presentation/ (`:presentation`, Kotlin/JVM)
 
-Glasses screen models, rendered through `GlassesDisplayPort` (`:domain`):
+Glasses UI bridge. Turns Home Assistant state into protocol-neutral `DisplayScreen`s and pushes them
+through `GlassesDisplayPort` (implemented by the Rokid adapter). It never sees the HA URL or token.
 
-| Folder | Screen |
+| Class | Role |
 | --- | --- |
-| `dashboard/` | A. Home Dashboard |
-| `quick_control/` | B. Quick Control |
-| `device_detail/` | C. Device Detail |
-| `notifications/` | D. Notification, E. Confirmation |
+| `GlassesDashboardBridge` | Auto-opens the dashboard when the glasses link is ready; sends only changed lines; re-opens on layout change |
+| `dashboard.DashboardRenderer` | Screen A (Home Dashboard): HA status, selected entities, alert, freshness footer; offline/stale handling |
+| `dashboard.EntityFormatter` | Short value text per domain (`ON`, `26.0 °C`, `OPEN`, `COOL 26°`, `UNAVAILABLE`) |
+| `notifications.NotificationCenter` | HIGH / MEDIUM / LOW priority, expiry, dismissal; LOW never shown on the glasses |
 
-Only CustomView features marked VERIFIED in [docs/SDK_COMPATIBILITY.md](../docs/SDK_COMPATIBILITY.md) may be used.
-See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) §5.2.
+Screens B–E (quick control, device detail, notification, confirmation on the glasses) are not
+implemented: they need verified CustomView behaviour and glasses-side input (CXR-S).
+Tests: `./gradlew :presentation:test`.

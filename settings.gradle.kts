@@ -31,3 +31,6 @@ rootProject.name = "rokid-ha"
 include(":app")
 include(":rokid")
 include(":domain")
+include(":homeassistant")
+include(":presentation")
+include(":data")

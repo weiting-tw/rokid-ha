@@ -31,27 +31,26 @@ flowchart LR
 
 ## 3. 模組與依賴規則
 
-| 模組 | 型態 | 內容 | 可依賴 | 狀態 |
-| --- | --- | --- | --- | --- |
-| `:domain` | Kotlin/JVM | 純模型與 port 介面：`GlassesDisplayPort`、`GlassesLinkState`、`DisplayScreen`、`GlassesDeviceInfo`；之後加入 Entity、Command、Notification 模型 | coroutines | ✅ P0 |
-| `:rokid` | Android library | Rokid adapter：授權、Session、連線狀態、CustomView JSON 建構/驗證、`DisplayScreen → CustomView` 渲染、（P5）眼鏡端事件 | `:domain`、`client-l` | ✅ P0 |
-| `:app` | Android app | P0：驗證 App。之後：Compose 手機 UI、DI 組裝、前景服務 | 全部 | ✅ P0（驗證用） |
-| `homeassistant/` | Kotlin（JVM） | REST、WebSocket、認證、訂閱、重連、實體快取 | `:domain`、OkHttp | 設計（P2） |
-| `data/` | Android library | 設定、白名單、Keystore 加密儲存 | `:domain` | 設計（P2） |
-| `presentation/` | Kotlin（JVM） | 五個眼鏡畫面的畫面模型：`dashboard/`、`quick_control/`、`device_detail/`、`notifications/`（+ 確認對話框） | `:domain` | 設計（P1） |
-| `interaction/` | Kotlin（JVM）+ adapter | 輸入事件標準化、導航、選取、確認、逾時、去抖動：`phone/`、`buttons/`、`touch/`、`imu/` | `:domain` | 設計（P1/P5/P6） |
-| `security/` | Kotlin（JVM） | 實體白名單、服務白名單、確認政策、AI 意圖驗證 | `:domain` | 設計（P2/P3） |
+| 模組 | 型態 | 內容 | 可依賴 |
+| --- | --- | --- | --- |
+| `:domain` | Kotlin/JVM | 眼鏡 port：`GlassesDisplayPort`、`GlassesLinkState`、`DisplayScreen`、`GlassesDeviceInfo` | coroutines |
+| `:homeassistant` | Kotlin/JVM | URL 政策（`HaServerUrl`）、`AccessToken`、REST（`HaRestClient`）、WebSocket（`HaWebSocketConnector`/`HaWsSession`）、`HaConnectionManager`（重連/退避/快取）、`HaConnectionTester`、mDNS TXT 解析、`CredentialStore` 邏輯、`GlassesSelection`/`ServiceCatalog`/`ServiceCallGuard`、`HaNotification` | OkHttp、kotlinx-serialization、coroutines |
+| `:presentation` | Kotlin/JVM | Glasses UI Bridge（`GlassesDashboardBridge`）、`DashboardRenderer`、`EntityFormatter`、`NotificationCenter`（優先級） | `:domain`、`:homeassistant` |
+| `:data` | Android library | `KeystoreSecretCipher`（Android Keystore AES-GCM）、`SharedPrefsKeyValueStore`、`NsdHaDiscovery`（NsdManager） | `:homeassistant` |
+| `:rokid` | Android library | Rokid CXR-L adapter：授權、Session、CustomView JSON、`RokidGlassesLink implements GlassesDisplayPort` | `:domain`、`client-l` |
+| `:app` | Android app | 設定 / 實體 / 眼鏡三個畫面、`AppContainer` 組裝、`HaConnectionService` 前景服務、P0 診斷 | 全部 |
 
 依賴方向（不可反向）：
 
 ```
-app ─▶ rokid ─▶ domain ◀─ homeassistant
- │                ▲  ▲
- └────────────────┘  └─ presentation, interaction, security, data
+app ─▶ data ─▶ homeassistant ◀─ presentation ─▶ domain ◀─ rokid
+ └──────────────────────────────────┴───────────────────────┘
 ```
 
-`homeassistant` 與 `presentation` **絕不能**看到 `com.rokid.*`；`rokid` 不知道 Home Assistant 存在。
-目前資料夾 `data/`、`homeassistant/` 等只放 README（設計說明），實作時才轉成 Gradle 模組。
+- `homeassistant`、`presentation` **看不到** `com.rokid.*` 與 Android；`rokid` 不知道 Home Assistant 存在。
+- 憑證（URL、token）只存在於 `homeassistant`（`HaConfig`）、`data`（加密儲存）與 `app` 的設定畫面。
+  `GlassesDashboardBridge` 的輸入只有實體狀態、連線狀態與通知 —— **型別上就拿不到 token**，並有端到端測試確認眼鏡收到的文字不含 token 與伺服器位址。
+- `interaction/`、`security/` 目前只有 README：互動（P5/P6）尚未實作；安全規則已實作於 `homeassistant/selection` 與 `credentials`。
 
 ## 4. Rokid Adapter（已實作）
 
@@ -97,48 +96,62 @@ stateDiagram-v2
 
 SDK 回呼來自 binder 執行緒；所有狀態以 `MutableStateFlow.update` 原子更新。公開方法預期由主執行緒呼叫。UI 以 `collectAsStateWithLifecycle` 讀取。
 
-## 5. 後續模組設計（未實作）
+## 5. Home Assistant 整合（已實作）
 
-### 5.1 Home Assistant Client（P2）
+### 5.1 設定流程（手機）
 
-- REST：`/api/`、`/api/states`、`/api/states/{entity_id}`、`/api/services/{domain}/{service}`。
-- WebSocket `/api/websocket`：`auth` → `get_states`（初始快取）→ `subscribe_events(state_changed)` 或 `subscribe_entities`（只訂閱白名單實體）→ `call_service`。
-- 重連：指數退避 + 抖動；重連成功後**重新認證、重新 `get_states`、重新訂閱**。
-- **未完成的命令不重送**：命令有 `id` 與逾時；斷線時一律標記為「結果未知」，UI 顯示讓使用者自行決定是否重試。
-- 本地實體快取：`Map<entityId, EntityState>`，`unavailable` / `unknown` 是一級狀態，畫面上明確顯示。
-- 只依賴 `:domain`；用 OkHttp WebSocket。HTTPS/WSS 強制（只允許使用者明確設定的本地網段例外，預設關閉）。
+`發現（mDNS）或手動輸入 URL → 貼上 Long-Lived Access Token → Test（REST /api/ + /api/config + WS auth）→ Save（Keystore 加密）→ 連線`。
+眼鏡端完全不需要輸入任何東西。
 
-### 5.2 Display Renderer / Presentation（P1）
+### 5.2 HaConnectionManager
 
-- 五個畫面（Home Dashboard、Quick Control、Device Detail、Notification、Confirmation）各自是純 Kotlin 的畫面模型 → `DisplayScreen`。
-- 第一次顯示用 `show()`（`customViewOpen`），之後同畫面內只用 `updateText()`（`customViewUpdate`）做增量更新；換畫面才 close + open。
-- 更新節流：同一行合併，最多每 N 毫秒送一次（N 依 V-12b 實測結果決定）。
-- 選取游標以文字前綴呈現（例如 `▶`），因為 CustomView 沒有焦點/點擊能力。
+```mermaid
+stateDiagram-v2
+    [*] --> NotConfigured
+    NotConfigured --> Connecting: start(config)
+    Connecting --> Connected: auth_ok → subscribe state_changed → get_states
+    Connecting --> Retrying: 不可達 / TLS / 協定錯誤
+    Connected --> Retrying: 斷線（ping 逾時、HA 重啟、網路切換）
+    Retrying --> Connecting: 退避到期 或 retryNow()
+    Connecting --> CredentialsRejected: auth_invalid / 401
+    Connected --> Stopped: stop()
+    Retrying --> Stopped: stop()
+    CredentialsRejected --> Connecting: 使用者存入新 token
+    Stopped --> NotConfigured: reset()（Disconnect 刪除憑證）
+```
 
-### 5.3 Interaction Engine（P1 手機、P5 眼鏡端、P6 IMU）
+- 先 `subscribe_events(state_changed)` 再 `get_states`，避免兩者之間的變化遺失。
+- 非管理員使用者只能訂閱 allowlist 內的事件（`state_changed` 可以，自訂事件不行），所以 HA 通知改經由 helper 實體 `input_text.rokid_ha_notification` 傳遞。
+- 區域（area）以 registry 指令盡力取得；失敗時以 domain 分組。
+- **命令不排隊、不重播**：離線時 `callService` 立即失敗；進行中的命令遇到斷線回報 `ConnectionLost`（結果未知）。
 
-- 所有輸入來源轉成同一組語意事件：`Next`、`Previous`、`Select`、`Back`、`Confirm`、`Cancel`。
-- Phase 1：手機觸控（主要輸入）。
-- Phase 2（P5）：CustomView **沒有輸入回呼**；眼鏡按鍵/觸控板只有在 CustomApp（眼鏡端 APK + CXR-S）的系統有序廣播可取得，再經自訂指令傳回手機。這代表顯示也可能要從 CustomView 改為 CustomApp，屆時重新評估。
-- Phase 3（P6）：IMU 沒有任何 SDK API，需先在眼鏡端 App 實測 Android `SensorManager`。
-- 防誤觸：去抖動、手勢門檻、互動逾時、模式鎖定、危險操作二次確認。
+### 5.3 Glasses UI Bridge
 
-### 5.4 Notification Manager（P4）
+- 眼鏡鏈路就緒（`linkReady`）且 autoShow 開啟 → 自動 `show(dashboard)`。
+- 之後只送出有變化的行（`updateText` → `customViewUpdate`），最小間隔 500 ms。
+- favorites 改變 → `hide()`，收到關閉後以新版面重開。
+- HA 離線：狀態行 `HA OFFLINE · reconnecting`、數值加 `~` 前綴、頁尾 `Not live · last data …`；未設定 / 已登出 / token 被拒：數值隱藏。
+- 通知：HIGH 立即顯示 15 分鐘、MEDIUM 5 分鐘、LOW 只在手機顯示。
 
-- 來源：HA 事件（自訂 event 或特定實體狀態變化），由 HA 端 automation 決定是否通知；Android 不自行判斷自動化。
-- 三級優先：HIGH（門開、漏水、警報、設備故障）、MEDIUM（洗碗機/洗衣機完成、溫度異常）、LOW（一般狀態）。
-- HIGH 立即搶佔顯示；MEDIUM 排隊；LOW 不主動佔用眼鏡顯示，只在 Dashboard 摘要出現。
-- 佇列、去重、過期、手動關閉；通知上的動作只能是白名單內的 script/scene。
+### 5.4 互動
 
-### 5.5 Security（P2/P3）
+CustomView 沒有輸入事件（DOCUMENTED）。快速操作在手機上執行，必須是使用者設定的 quick action（= allowlist），
+且屬於 `ServiceCatalog`；lock / cover 需要確認對話框。眼鏡端按鍵 / 觸控板需 CXR-S CustomApp（P5，未實作）。IMU 無 SDK API（P6）。
 
-- 專用 HA 使用者帳號 + Long-Lived Access Token，以 Android Keystore 支援的加密儲存（AES-GCM，金鑰不可匯出）。
-- 憑證絕不送往眼鏡、不寫入 log。
-- 實體白名單（預設空，使用者挑選）+ 服務白名單（`domain.service` 粒度）。
-- 確認政策：`lock.*`、`alarm_control_panel.*`、`cover.*`、標記為敏感的 script/scene 一律需要確認畫面。
-- AI（P6）只能輸出 `{"intent": ..., "entity_id": ..., ...}`，經白名單 + schema 驗證後轉成命令，仍走同一個確認政策。
+### 5.5 安全
 
-## 6. 開發里程碑對應
+見 README「Security considerations」。重點：Keystore AES-256-GCM、禁止備份、token 不記錄不顯示、`AccessToken.toString()` 遮蔽、
+不跟隨 redirect、遠端強制 https 且不降級、設定頁 `FLAG_SECURE`、Disconnect 連同金鑰刪除。
+HA 本身沒有逐實體權限，allowlist 保護的是本 App 的行為，不是 token 外洩後的風險。
+
+### 5.6 背景執行與 QR 配對
+
+見 [BACKGROUND_OPERATION.md](BACKGROUND_OPERATION.md) 與 [QR_PAIRING.md](QR_PAIRING.md)（僅設計）。
+
+## 6. 開發里程碑對應（原始 P0–P6 規劃）
+
+> 2026-11-02：依使用者明確要求，在眼鏡實機驗證完成前即實作 Home Assistant 手機端整合與 Dashboard 同步。
+> 所有依賴眼鏡的功能仍標記為 DOCUMENTED / UNKNOWN，直到實機驗證。
 
 | 里程碑 | 交付 | 進入條件 |
 | --- | --- | --- |
@@ -164,5 +177,7 @@ SDK 回呼來自 binder 執行緒；所有狀態以 `MutableStateFlow.update` �
 | JVM target | 17 | 可在 JDK 17 或更新版本建置 |
 | Compose BOM | 2024.12.01 | 與 Kotlin 2.0.21 compose compiler 相容 |
 | coroutines | 1.9.0 | 與 client-l 1.1.x 未來可能的依賴一致 |
+| OkHttp / MockWebServer | 4.12.0 | 成熟穩定版；REST + WebSocket；MockWebServer 支援 WebSocket 測試 |
+| kotlinx-serialization-json | 1.7.3 | 與 Kotlin 2.0.21 相容；只用 JsonElement API，不需編譯器 plugin |
 
 未來若需升級到 AGP 9 / compileSdk 36，再對照官方範例工程設定進行。

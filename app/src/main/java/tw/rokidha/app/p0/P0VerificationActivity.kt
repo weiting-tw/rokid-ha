@@ -49,6 +49,8 @@ class P0VerificationActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Diagnostics owns the CustomView while open; the dashboard bridge resumes in MainActivity.onStart.
+        (application as tw.rokidha.app.RokidHaApplication).container.bridge.autoShow.value = false
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(Modifier.fillMaxSize()) {

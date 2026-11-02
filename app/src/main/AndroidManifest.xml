@@ -1,24 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Only INTERNET is needed for CXR-L CustomView (official docs, "SDK 导入").
-         Storage permissions are only needed for CustomApp APK install, out of P0 scope. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Reconnect when the network comes back. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Optional "keep connected" foreground service (glasses = connected device). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- One of the prerequisites Android 14+ requires for the connectedDevice FGS type. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- Ongoing notification of the foreground service (Android 13+ runtime permission). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".RokidHaApplication"
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
+
         <activity
-            android:name=".p0.P0VerificationActivity"
+            android:name=".ui.MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- P0 SDK diagnostics, opened from the Glasses tab. -->
+        <activity
+            android:name=".p0.P0VerificationActivity"
+            android:exported="false"
+            android:launchMode="singleTop" />
+
+        <service
+            android:name=".service.HaConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>
