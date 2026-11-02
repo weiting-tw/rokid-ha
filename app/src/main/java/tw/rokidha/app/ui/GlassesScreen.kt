@@ -46,7 +46,12 @@ import tw.rokidha.app.RokidHaApplication
 import tw.rokidha.app.p0.P0VerificationActivity
 import tw.rokidha.app.service.HaConnectionService
 import tw.rokidha.domain.glasses.GlassesLinkState
-import tw.rokidha.homeassistant.HaException
+import tw.rokidha.domain.glasses.GlassesInput
+import tw.rokidha.homeassistant.connection.HaConnectionState
+import tw.rokidha.homeassistant.model.HaEntity
+import tw.rokidha.presentation.dashboard.DashboardRenderer
+import tw.rokidha.presentation.interaction.InteractionView
+import androidx.compose.material3.RadioButton
 import tw.rokidha.homeassistant.selection.QuickAction
 import tw.rokidha.rokid.link.RokidGlassesLink
 
@@ -59,8 +64,6 @@ class GlassesViewModel(app: Application) : AndroidViewModel(app) {
     val selection = c.selection
     val haState = c.haManager.state
     val notifications = c.notifications.all
-    private val _message = MutableStateFlow<String?>(null)
-    val message = _message.asStateFlow()
     private val _background = MutableStateFlow(c.keepConnectedInBackground)
     val background = _background.asStateFlow()
 
@@ -95,16 +98,28 @@ class GlassesViewModel(app: Application) : AndroidViewModel(app) {
         if (on) HaConnectionService.start(context) else HaConnectionService.stop(context)
     }
 
+    /** Phone quick action through the shared dispatcher; progress is shown from [commandStatus]. */
     fun run(action: QuickAction) {
-        viewModelScope.launch {
-            _message.value = try {
-                c.runQuickAction(action)
-                "${action.label}: sent"
-            } catch (e: HaException) {
-                e.userMessage // NotConnected: nothing is queued, the user can tap again later
-            }
-        }
+        viewModelScope.launch { c.runQuickAction(action) }
     }
+
+    val commandStatus = c.dispatcher.status
+    val interaction = c.interaction.view
+    private val _control = MutableStateFlow(c.glassesControlEnabled)
+    val control = _control.asStateFlow()
+    private val _suppress = MutableStateFlow(c.suppressRokidAssistant)
+    val suppress = _suppress.asStateFlow()
+
+    fun setControl(on: Boolean) { c.glassesControlEnabled = on; _control.value = on }
+    fun setSuppress(on: Boolean) { c.suppressRokidAssistant = on; _suppress.value = on }
+    fun selectTarget(id: String) = c.interaction.selectTarget(id)
+    fun simulate(kind: GlassesInput.Kind) = c.simulateInput(kind)
+
+    /** Same wording as on the glasses. */
+    fun describe(v: InteractionView?, entities: Map<String, HaEntity>, live: Boolean): String =
+        v?.let { renderer.interactionText(it, entities, live) } ?: "Glasses control is off"
+    private val renderer = DashboardRenderer()
+    val entities = c.haManager.entities
 
     fun dismiss(id: String) = c.notifications.dismiss(id)
 
@@ -124,8 +139,12 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
     val sel by vm.selection.collectAsStateWithLifecycle()
     val ha by vm.haState.collectAsStateWithLifecycle()
     val notes by vm.notifications.collectAsStateWithLifecycle()
-    val msg by vm.message.collectAsStateWithLifecycle()
     val bg by vm.background.collectAsStateWithLifecycle()
+    val iv by vm.interaction.collectAsStateWithLifecycle()
+    val control by vm.control.collectAsStateWithLifecycle()
+    val suppress by vm.suppress.collectAsStateWithLifecycle()
+    val status by vm.commandStatus.collectAsStateWithLifecycle()
+    val ents by vm.entities.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf<QuickAction?>(null) }
 
     Column(
@@ -162,11 +181,43 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
             }
         }
 
-        Text("Quick actions", fontWeight = FontWeight.Bold)
+        Text("Glasses control (EXPERIMENTAL)", fontWeight = FontWeight.Bold)
         Text(
-            "Rokid CustomView has no input events, so actions are triggered here on the phone (glasses buttons: future CXR-S work).",
+            "CustomView has no input events. The only glasses input CXR-L delivers is the AI key / wake event. " +
+                "Press once to arm the target below, press again within 5 s to send. The wake word may also trigger it; " +
+                "not yet verified on Founder Edition firmware 1.27.009.",
             style = MaterialTheme.typography.bodySmall,
         )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(control, vm::setControl)
+            Text("  Use glasses AI key as input", Modifier.padding(start = 8.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(suppress, vm::setSuppress, enabled = control)
+            Text("  Ask Rokid app not to start its assistant (undocumented API)", Modifier.padding(start = 8.dp))
+        }
+        if (control) {
+            Text("Glasses target", fontWeight = FontWeight.Bold)
+            sel.quickActions.forEach { a ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(iv?.target?.id == a.id, { vm.selectTarget(a.id) })
+                    Text("${a.label} · ${ents[a.entityId]?.friendlyName ?: a.entityId}")
+                }
+            }
+            Card(Modifier.fillMaxWidth()) {
+                Text(vm.describe(iv, ents, ha is HaConnectionState.Connected), Modifier.padding(12.dp), fontFamily = FontFamily.Monospace)
+            }
+            Text("Input simulator — SIMULATED, not glasses hardware", style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = { vm.simulate(GlassesInput.Kind.PRIMARY) }) { Text("AI key") }
+                OutlinedButton(onClick = { vm.simulate(GlassesInput.Kind.PREVIOUS) }) { Text("Prev") }
+                OutlinedButton(onClick = { vm.simulate(GlassesInput.Kind.NEXT) }) { Text("Next") }
+                OutlinedButton(onClick = { vm.simulate(GlassesInput.Kind.SELECT) }) { Text("Select") }
+                OutlinedButton(onClick = { vm.simulate(GlassesInput.Kind.BACK) }) { Text("Back") }
+            }
+        }
+
+        Text("Quick actions (phone)", fontWeight = FontWeight.Bold)
         if (sel.quickActions.isEmpty()) Text("None configured. Add them in the Entities tab.")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             sel.quickActions.forEach { a ->
@@ -175,7 +226,13 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
                 }
             }
         }
-        msg?.let { Text(it) }
+        status?.let { Text("Last command: ${it::class.simpleName} · ${it.action.label} ${it.action.entityId}" + when (it) {
+            is tw.rokidha.presentation.interaction.CommandStatus.Failed -> " — ${it.reason}"
+            is tw.rokidha.presentation.interaction.CommandStatus.Rejected -> " — ${it.reason}"
+            is tw.rokidha.presentation.interaction.CommandStatus.Unavailable -> " — ${it.reason}"
+            is tw.rokidha.presentation.interaction.CommandStatus.Confirmed -> " — HA state ${it.state}"
+            else -> ""
+        }) }
 
         Text("Notifications", fontWeight = FontWeight.Bold)
         if (notes.isEmpty()) Text("None. HA automations write to ${sel.notificationEntityId}.", style = MaterialTheme.typography.bodySmall)

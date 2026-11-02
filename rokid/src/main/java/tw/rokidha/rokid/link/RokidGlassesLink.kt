@@ -13,13 +13,19 @@ import com.rokid.cxr.link.utils.CxrDefs
 import com.rokid.cxr.link.utils.GlassInfo
 import com.rokid.sprite.aiapp.externalapp.auth.AuthResult
 import com.rokid.sprite.aiapp.externalapp.auth.AuthorizationHelper
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import tw.rokidha.domain.glasses.DisplayScreen
 import tw.rokidha.domain.glasses.GlassesDeviceInfo
 import tw.rokidha.domain.glasses.GlassesDisplayPort
+import tw.rokidha.domain.glasses.GlassesInput
+import tw.rokidha.domain.glasses.GlassesInputSource
 import tw.rokidha.domain.glasses.GlassesLinkState
 import tw.rokidha.domain.glasses.GlassesLinkState.Stage
 import tw.rokidha.rokid.BuildConfig
@@ -51,7 +57,7 @@ class RokidGlassesLink(
     context: Context,
     private val logger: (String) -> Unit = {},
     private val renderer: DisplayScreenRenderer = DisplayScreenRenderer(),
-) : GlassesDisplayPort {
+) : GlassesDisplayPort, GlassesInputSource {
 
     private val appContext = context.applicationContext
 
@@ -64,6 +70,22 @@ class RokidGlassesLink(
     /** Number of `onCustomViewUpdated` callbacks since the view was last opened. */
     private val _updateAcks = MutableStateFlow(0)
     val updateAcks: StateFlow<Int> = _updateAcks.asStateFlow()
+
+    private val _inputs = MutableSharedFlow<GlassesInput>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /**
+     * Glasses input reaching the phone through CXR-L. The only candidate in CXR-L 1.0.3/1.0.4 is
+     * the AI key / wake callback ([ICXRLinkCbk.onGlassAiAssistStart], and
+     * [ICXRLinkCbk.onGlassAiInterrupt] when interrupt mode is on): one event per press, no
+     * short/long distinction (`onAiKeyUp` is not forwarded by the SDK). DOCUMENTED as a callback,
+     * EXPERIMENTAL as a control input; not verified on the target glasses.
+     * CustomView itself has no input callbacks.
+     */
+    override val inputs: SharedFlow<GlassesInput> = _inputs.asSharedFlow()
+
+    /** Forward AI key / wake events as [GlassesInput.Kind.PRIMARY]. Off by default. */
+    @Volatile var aiKeyInputEnabled: Boolean = false
+    private val inputSeq = java.util.concurrent.atomic.AtomicLong()
 
     @Volatile private var link: CXRLink? = null
     @Volatile private var token: String? = null
@@ -309,9 +331,17 @@ class RokidGlassesLink(
         }
 
         override fun onGlassWearingStatus(wearing: Boolean) = log("cb: onGlassWearingStatus($wearing)")
-        override fun onGlassAiAssistStart() = log("cb: onGlassAiAssistStart()")
+        override fun onGlassAiAssistStart() {
+            log("cb: onGlassAiAssistStart() inputEnabled=$aiKeyInputEnabled")
+            emitAiKey()
+        }
+
         override fun onGlassAiAssistStop() = log("cb: onGlassAiAssistStop()")
-        override fun onGlassAiInterrupt(interruptWake: Boolean) = log("cb: onGlassAiInterrupt($interruptWake)")
+
+        override fun onGlassAiInterrupt(interruptWake: Boolean) {
+            log("cb: onGlassAiInterrupt($interruptWake) inputEnabled=$aiKeyInputEnabled")
+            if (interruptWake) emitAiKey()
+        }
     }
 
     private val customViewCallback = object : ICustomViewCbk {
@@ -339,6 +369,24 @@ class RokidGlassesLink(
             openTree = null
             _state.update { recompute(it.copy(displayOpen = false, lastError = "customView error $code: $message")) }
         }
+    }
+
+    private fun emitAiKey() {
+        if (!aiKeyInputEnabled) return
+        // One press may arrive through both callbacks; the interaction layer debounces.
+        _inputs.tryEmit(GlassesInput(GlassesInput.Kind.PRIMARY, GlassesInput.Source.CXRL_AI_KEY, System.currentTimeMillis(), inputSeq.incrementAndGet()))
+    }
+
+    /**
+     * Asks the Rokid app to stop handling AI-key wake-ups itself (`setInterruptAiWake`). Present in
+     * client-l 1.0.3/1.0.4 binaries but NOT described in the official docs: EXPERIMENTAL.
+     * Effect on the target firmware is unknown; requires a connected link.
+     */
+    fun setAssistantInterrupt(enabled: Boolean): Boolean {
+        val l = link ?: return failFalse("assistant interrupt: not connected")
+        val ok = runCatching { l.setInterruptAiWake(enabled) }.getOrElse { return failFalse("setInterruptAiWake threw ${it.message}") }
+        log("ai: setInterruptAiWake($enabled) -> $ok (EXPERIMENTAL)")
+        return ok
     }
 
     private fun recompute(s: GlassesLinkState): GlassesLinkState {

@@ -27,7 +27,7 @@ Rokid Glasses ──CXR-L──▶ Android Companion App ──HTTPS/WSS──�
 | mDNS discovery (`_home-assistant._tcp`) | Implemented (Android NsdManager); parser unit-tested; **real-network behaviour untested** |
 | Entity selection, quick actions, service allowlist | Implemented, unit-tested |
 | Glasses dashboard sync (auto-open, live updates, offline state, notifications) | Implemented and tested with a fake display; **on-glasses rendering is DOCUMENTED, not VERIFIED** |
-| Controls from the glasses themselves | Not possible with CustomView (no input events); actions run from the phone. Future CXR-S work |
+| Controls from the glasses themselves | AI key (CXR-L) as single input with two-step confirm — implemented, opt-in, **EXPERIMENTAL, not verified on glasses**; pipeline SIMULATED-tested. Buttons/touchpad need CXR-S (not implemented). See [docs/GLASSES_CONTROL.md](docs/GLASSES_CONTROL.md) |
 | QR pairing | Design only — [docs/QR_PAIRING.md](docs/QR_PAIRING.md) |
 | Background operation | Foreground-service option + reconnect hooks — [docs/BACKGROUND_OPERATION.md](docs/BACKGROUND_OPERATION.md) |
 
@@ -99,6 +99,13 @@ Requirements: ARM Android phone, Android 12+, **Rokid AI App ≥ 1.9.0** (mainla
    actions allowed for each. Nothing is shown on the glasses until you select it.
 4. Quick action buttons on the Glasses tab call the allowlisted services; locks and covers ask for
    confirmation first.
+5. **Glasses control (experimental):** Glasses tab → *Use glasses AI key as input*, pick the
+   *Glasses target* (one of your quick actions). On the glasses, press the AI key once (the dashboard
+   shows `Confirm … Press again`), press again within 5 s to send. The result line shows
+   `Sending… → Waiting for HA… → OK: … is OFF` only after Home Assistant reports the new state, or
+   `Failed / Blocked / Unavailable`. This is the only glasses input CXR-L provides. It may also be
+   triggered by the wake word and may open the Rokid assistant; it is **not yet verified** on the
+   Founder Edition. The *Input simulator* buttons test the same pipeline from the phone (simulated).
 
 If Home Assistant is unreachable, the glasses show `HA OFFLINE · reconnecting`, cached values are
 prefixed with `~`, and the footer says `Not live · last data HH:MM:SS`. After *Disconnect* or a
@@ -253,3 +260,4 @@ git push origin v0.2.0
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, dependency rules, state machines |
 | [docs/BACKGROUND_OPERATION.md](docs/BACKGROUND_OPERATION.md) | Background strategy and Android limits |
 | [docs/QR_PAIRING.md](docs/QR_PAIRING.md) | Future secure QR pairing design |
+| [docs/GLASSES_CONTROL.md](docs/GLASSES_CONTROL.md) | Glasses input investigation, SDK capability matrix, command pipeline, test map |

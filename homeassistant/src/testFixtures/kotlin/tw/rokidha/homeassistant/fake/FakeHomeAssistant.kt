@@ -41,6 +41,12 @@ class FakeHomeAssistant(@Volatile var validToken: String = VALID_TOKEN) : Closea
     /** Every text frame received over the WebSocket, for leak checks. */
     val wsFramesFromClient = CopyOnWriteArrayList<String>()
 
+    /** call_service on these entities returns an error result (simulates a failing device). */
+    val failingEntities: MutableSet<String> = java.util.Collections.newSetFromMap(ConcurrentHashMap())
+
+    /** Like real HA: successful on/off/toggle/lock calls change the state and push state_changed. */
+    @Volatile var applyServiceEffects: Boolean = true
+
     val baseUrl: String get() = server.url("/").toString().trimEnd('/')
 
     init {
@@ -76,6 +82,19 @@ class FakeHomeAssistant(@Volatile var validToken: String = VALID_TOKEN) : Closea
                 )
             }
         }
+    }
+
+    private fun applyEffect(entityId: String, service: String) {
+        val cur = (states[entityId]?.get("state") as? JsonPrimitive)?.content ?: return
+        val next = when (service) {
+            "turn_on" -> "on"
+            "turn_off" -> "off"
+            "toggle" -> if (cur == "on") "off" else "on"
+            "lock" -> "locked"
+            "unlock" -> "unlocked"
+            else -> return
+        }
+        pushState(entityId, next)
     }
 
     /** Closes every WebSocket with 1012 (as Home Assistant does when it restarts). */
@@ -149,7 +168,13 @@ class FakeHomeAssistant(@Volatile var validToken: String = VALID_TOKEN) : Closea
                 }
                 "call_service" -> {
                     serviceCalls += m
-                    result(webSocket, id!!, buildJsonObject { put("context", buildJsonObject { put("id", "ctx") }) })
+                    val target = ((m["target"] as? JsonObject)?.get("entity_id") as? JsonPrimitive)?.content
+                    if (target != null && target in failingEntities) {
+                        error(webSocket, id!!, "home_assistant_error", "Device did not respond")
+                    } else {
+                        result(webSocket, id!!, buildJsonObject { put("context", buildJsonObject { put("id", "ctx") }) })
+                        if (applyServiceEffects && target != null) applyEffect(target, (m["service"] as JsonPrimitive).content)
+                    }
                 }
                 "config/area_registry/list" -> result(webSocket, id!!, json.parseToJsonElement("""[{"area_id":"living","name":"Living Room"}]"""))
                 "config/device_registry/list" -> result(webSocket, id!!, JsonArray(emptyList()))

@@ -66,6 +66,27 @@
 | V-12j | 戴著眼鏡時 `onGlassWearingStatus` 是否觸發 | 摘戴眼鏡 | |
 | V-12k | `client-l:1.0.3` 重建後 B-1~B-15 是否相同 | `-Prokid.cxrl.version=1.0.3` | |
 
+## F. 眼鏡 → 手機 → Home Assistant 控制（2026-11-02 新增）
+
+前提：B 段可開啟 Dashboard；HA 已在手機設定並連線；Entities 分頁已選 `light.<客廳燈>` 並勾選 quick action「Off」與「On」，另選一個 script 加「Run」。
+Glasses 分頁 → 開啟「Use glasses AI key as input」；「Glasses target」選 `Off · <客廳燈>`。
+
+| 步驟 | 操作 | 預期 | 結果 |
+| --- | --- | --- | --- |
+| F-1 | 先用手機的 Input simulator 按 AI key 兩次（間隔 > 0.5 秒） | 眼鏡顯示 `Confirm Off …? Press again` → `Sending…` → `OK: … is OFF`；燈真的關掉。（這只證明手機→HA→眼鏡，**SIMULATED 輸入**） | ☐ |
+| F-2 | 戴上眼鏡，**按一次眼鏡 AI 鍵（或觸控板長按）** | P0 log（SDK diagnostics）出現 `cb: onGlassAiAssistStart()` 或 `cb: onGlassAiInterrupt(true)`；眼鏡顯示 `Confirm …? Press again` | ☐ |
+| F-2a | 同時觀察 | Rokid 助理是否啟動？Dashboard 是否被蓋住 / 關閉？`onGlassAiAssistStop` 何時出現？ | |
+| F-3 | 5 秒內再按一次 | 燈關掉；眼鏡顯示 `OK: <燈> is OFF`（來自 HA 狀態） | ☐ |
+| F-4 | 只按一次，等 6 秒 | 顯示 `Timed out — nothing sent`；燈不變 | ☐ |
+| F-5 | 說喚醒詞（不按鍵） | 是否也觸發 armed？（記錄：這決定誤觸風險） | |
+| F-6 | 開啟「Ask Rokid app not to start its assistant」，重做 F-2/F-3 | 助理是否不再啟動？事件改由 `onGlassAiInterrupt(true)` 傳來？（EXPERIMENTAL） | |
+| F-7 | HA 端讓燈離線（拔電/停用）後按兩次 | `Unavailable: …`，沒有送出命令 | ☐ |
+| F-8 | 關閉手機 Wi-Fi 後按兩次 | `Controls paused: HA offline`，恢復網路後不會自動補送 | ☐ |
+| F-9 | 眼鏡藍牙斷線再連回 | HA 同步不中斷（手機 Entities 頁仍更新）；Dashboard 自動重開 | ☐ |
+| F-10 | 關閉「Use glasses AI key as input」後按 AI 鍵 | 不會 arm、不會送命令 | ☐ |
+
+結果分類：F-2/F-3 通過才能把「AI key 控制」標為 VERIFIED；否則依 docs/GLASSES_CONTROL.md §4 評估 CXR-S。
+
 ## E. 完成條件
 
 P0 完成 = §B 全部通過、§1 的 #2–#10 在 SDK_COMPATIBILITY.md 中改為 VERIFIED，並附上報告檔。

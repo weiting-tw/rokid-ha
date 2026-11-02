@@ -47,7 +47,7 @@ class HaConnectionManager(
     private val scope: CoroutineScope,
     private val backoff: Backoff = Backoff(),
     private val clock: () -> Long = System::currentTimeMillis,
-) {
+) : ServiceCaller {
     private val _state = MutableStateFlow<HaConnectionState>(HaConnectionState.NotConfigured)
     val state: StateFlow<HaConnectionState> = _state.asStateFlow()
 
@@ -111,7 +111,7 @@ class HaConnectionManager(
      * Calls a service over the live session. Never queued: throws [HaException.NotConnected]
      * immediately when offline. Allowlist checks are the caller's job (see ServiceCallGuard).
      */
-    suspend fun callService(domain: String, service: String, entityId: String?, data: JsonObject = JsonObject(emptyMap())): JsonElement? {
+    override suspend fun callService(domain: String, service: String, entityId: String?, data: JsonObject): JsonElement? {
         require(HaEntity.SLUG.matches(domain) && HaEntity.SLUG.matches(service)) { "invalid domain/service" }
         val s = session ?: throw HaException.NotConnected()
         if (_state.value !is HaConnectionState.Connected) throw HaException.NotConnected()

@@ -25,7 +25,11 @@ import tw.rokidha.homeassistant.selection.SelectionStore
 import tw.rokidha.homeassistant.selection.ServiceCallGuard
 import tw.rokidha.homeassistant.setup.HaConnectionTester
 import tw.rokidha.homeassistant.ws.HaWebSocketConnector
+import tw.rokidha.domain.glasses.GlassesInput
 import tw.rokidha.presentation.GlassesDashboardBridge
+import tw.rokidha.presentation.interaction.ActionDispatcher
+import tw.rokidha.presentation.interaction.CommandStatus
+import tw.rokidha.presentation.interaction.GlassesInteractionController
 import tw.rokidha.presentation.notifications.NotificationCenter
 import tw.rokidha.rokid.link.RokidGlassesLink
 
@@ -61,6 +65,14 @@ class AppContainer(private val app: Application) {
 
     val glasses: RokidGlassesLink by lazy { RokidGlassesLink(app, logger = eventLog::add) }
 
+    /** Single permission gate + command path for phone buttons AND glasses input. */
+    val dispatcher = ActionDispatcher(guard, haManager, haManager.entities, haManager.state)
+
+    val interaction: GlassesInteractionController by lazy {
+        GlassesInteractionController(selection, haManager.state, glasses.state, dispatcher)
+    }
+    private val simulatorSeq = java.util.concurrent.atomic.AtomicLong()
+
     val bridge: GlassesDashboardBridge by lazy {
         GlassesDashboardBridge(
             display = glasses,
@@ -70,6 +82,7 @@ class AppContainer(private val app: Application) {
             selection = selection,
             notifications = notifications.all,
             noticeFor = notifications::forGlasses,
+            interaction = interaction.view,
         )
     }
 
@@ -78,10 +91,36 @@ class AppContainer(private val app: Application) {
         get() = prefs.getBoolean("keep_connected", false)
         set(v) { prefs.edit().putBoolean("keep_connected", v).apply() }
 
+    /** Glasses control (AI key input). Off by default; EXPERIMENTAL until verified on the glasses. */
+    var glassesControlEnabled: Boolean
+        get() = prefs.getBoolean("glasses_control", false)
+        set(v) {
+            prefs.edit().putBoolean("glasses_control", v).apply()
+            interaction.enabled.value = v
+            glasses.aiKeyInputEnabled = v
+        }
+
+    /** Undocumented `setInterruptAiWake`: ask the Rokid app not to handle the AI key itself. */
+    var suppressRokidAssistant: Boolean
+        get() = prefs.getBoolean("suppress_assistant", false)
+        set(v) {
+            prefs.edit().putBoolean("suppress_assistant", v).apply()
+            if (glasses.state.value.linkReady) glasses.setAssistantInterrupt(v)
+        }
+
     /** Called from Application.onCreate: restores the connection after an app restart. */
     fun startup() {
         haManager.notificationEntityId = _selection.value.notificationEntityId
         scope.launch { haManager.notifications.collect(notifications::add) }
+        interaction.enabled.value = glassesControlEnabled
+        glasses.aiKeyInputEnabled = glassesControlEnabled
+        interaction.start(scope)
+        scope.launch { glasses.inputs.collect(interaction::onInput) }
+        // Re-apply the assistant-interrupt preference each time the glasses link comes up.
+        scope.launch {
+            glasses.state.collect { s -> if (s.linkReady && suppressRokidAssistant && !appliedInterrupt) appliedInterrupt = glasses.setAssistantInterrupt(true)
+                if (!s.linkReady) appliedInterrupt = false }
+        }
         bridge.start(scope)
         connectStored()
         app.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(
@@ -118,9 +157,13 @@ class AppContainer(private val app: Application) {
         haManager.notificationEntityId = s.notificationEntityId
     }
 
-    /** Runs an allowlisted quick action. Confirmation for sensitive actions is done by the UI first. */
-    suspend fun runQuickAction(action: QuickAction) {
-        val allowed = guard.check(action.entityId, action.service)
-        haManager.callService(allowed.domain, allowed.service, allowed.entityId)
+    @Volatile private var appliedInterrupt = false
+
+    /** Phone quick action. Goes through the same dispatcher (allowlist, availability, no queue). */
+    suspend fun runQuickAction(action: QuickAction): CommandStatus = dispatcher.dispatch(action)
+
+    /** On-screen stand-in for glasses input. Results are SIMULATED, not hardware evidence. */
+    fun simulateInput(kind: GlassesInput.Kind) {
+        interaction.onInput(GlassesInput(kind, GlassesInput.Source.PHONE_SIMULATOR, System.currentTimeMillis(), simulatorSeq.incrementAndGet()))
     }
 }

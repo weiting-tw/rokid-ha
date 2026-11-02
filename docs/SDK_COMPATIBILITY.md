@@ -96,7 +96,12 @@
 | 狀態變化即時更新（只送變更行） | DOCUMENTED | `customViewUpdate`；更新頻率上限未知（V-12b），bridge 預設最小間隔 500 ms |
 | 8 行文字 Dashboard 的可讀性 / 可視區域 | UNKNOWN | 行數、字級、中文顯示待 V-11 |
 | 在眼鏡上顯示 HA 通知 | DOCUMENTED | 以 Dashboard 的一行文字呈現（無彈窗能力） |
-| 從眼鏡本身觸發控制 | UNSUPPORTED（CustomView） | CustomView 無輸入事件；控制在手機上執行。眼鏡按鍵需 CXR-S CustomApp（DOCUMENTED，未實作） |
+| 從眼鏡本身觸發控制 | UNSUPPORTED（CustomView 本身） | CustomView 無輸入事件 |
+| AI 鍵 / 喚醒 → 手機（`onGlassAiAssistStart`、`onGlassAiInterrupt`） | DOCUMENTED（回呼）／EXPERIMENTAL（作為控制輸入） | 已實作為單鍵 PRIMARY 輸入（預設關閉，兩段式確認）；未實機驗證，見 GLASSES_CONTROL.md |
+| `setInterruptAiWake`（抑制 Rokid 助理） | EXPERIMENTAL | 二進位存在、文件未記載；可選開關 |
+| 鏡腿按鍵 / 觸控板事件 → 手機 | DOCUMENTED（僅經 CXR-S 眼鏡端 CustomApp 轉送） | 需第二個 APK；未實作，待核准 |
+| 語音辨識結果 → 手機 | UNKNOWN（CXR-L 無 API） | 只有原始 PCM 音訊串流（DOCUMENTED） |
+| 手機端命令管線（allowlist、去重、無重送、狀態確認） | SIMULATED | `CommandPipelineTest` 15 項 |
 | 眼鏡掃描 QR Code | UNKNOWN | CXR-L 只有 `takePhoto`，無 QR 解碼；未實作也未計畫 |
 | App 重啟後無需使用者操作即重新連上眼鏡 | UNKNOWN | Rokid token 只存記憶體；授權「可能同步返回」為 DOCUMENTED，未驗證 |
 | 前景服務期間 CXR-L 連結在背景保持 | UNKNOWN | 取決於 Rokid AI App / Hi Rokid 背景行為 |

@@ -16,6 +16,7 @@ Automated tests live next to the code (Gradle convention). `./gradlew test` runs
 | Entity selection / allowlist | `CredentialAndSelectionTest` |
 | Glasses connection without exposing credentials | `presentation/.../GlassesCredentialIsolationTest` (fake HA → manager → bridge → fake glasses) |
 | Glasses dashboard sync, offline state, notification priority | `presentation/.../GlassesDashboardBridgeTest` |
+| Glasses → phone → HA command pipeline (allowlist, duplicates, offline, failures, stale/replay, display refresh) — SIMULATED | `presentation/.../interaction/CommandPipelineTest` |
 | CustomView JSON / schema | `rokid/.../CustomViewJsonTest` |
 
 The fake Home Assistant (`homeassistant/src/testFixtures/.../FakeHomeAssistant.kt`) serves REST and

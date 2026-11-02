@@ -6,6 +6,8 @@ import tw.rokidha.domain.glasses.DisplayScreen
 import tw.rokidha.homeassistant.connection.HaConnectionState
 import tw.rokidha.homeassistant.model.HaEntity
 import tw.rokidha.homeassistant.notifications.HaNotification
+import tw.rokidha.presentation.interaction.CommandStatus
+import tw.rokidha.presentation.interaction.InteractionView
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,6 +20,8 @@ data class DashboardModel(
     val entities: Map<String, HaEntity>,
     val lastSyncMs: Long?,
     val notice: HaNotification?,
+    /** Non-null when glasses control is enabled. */
+    val interaction: InteractionView? = null,
 )
 
 /**
@@ -47,9 +51,12 @@ class DashboardRenderer(private val timeZone: TimeZone = TimeZone.getDefault()) 
                     reconnecting && m.lastSyncMs != null -> "~ " + EntityFormatter.line(e)
                     else -> "${e.friendlyName}: —"
                 }
-                lines += DisplayLine("e$i", text, Style.BODY)
+                // ASCII cursor: glyph support on the glasses font is not verified.
+                val cursor = m.interaction?.target?.entityId == id
+                lines += DisplayLine("e$i", if (cursor) "> $text" else text, Style.BODY)
             }
         }
+        m.interaction?.let { lines += DisplayLine("action", interactionText(it, m.entities, live), Style.BODY) }
         val high = m.notice?.priority == HaNotification.Priority.HIGH
         lines += DisplayLine("notice", m.notice?.let(::noticeText) ?: "No alerts", if (high) Style.TITLE else Style.CAPTION)
         lines += DisplayLine("updated", updatedText(live, m.lastSyncMs), Style.CAPTION)
@@ -62,6 +69,30 @@ class DashboardRenderer(private val timeZone: TimeZone = TimeZone.getDefault()) 
         is HaConnectionState.CredentialsRejected -> "HA LOGIN REJECTED · check phone"
         HaConnectionState.Stopped -> "HA DISCONNECTED · check phone"
         HaConnectionState.NotConfigured -> "HA NOT SET UP · use phone app"
+    }
+
+    /** Pending, success, failure and unavailable are worded differently; "sent" is never shown as success. */
+    fun interactionText(v: InteractionView, entities: Map<String, HaEntity>, live: Boolean): String {
+        val t = v.target ?: return v.hint ?: "No quick actions — set them up on the phone"
+        fun name(id: String) = entities[id]?.friendlyName ?: id
+        val st = v.status
+        return when {
+            !live -> "Controls paused: HA offline"
+            v.armedUntilMs != null -> "Confirm ${t.label} · ${name(t.entityId)}? Press again"
+            st is CommandStatus.Sending -> "Sending ${st.action.label} · ${name(st.action.entityId)}…"
+            st is CommandStatus.AwaitingState -> "Waiting for HA: ${name(st.action.entityId)}…"
+            st != null && v.hint == null -> when (st) {
+                is CommandStatus.Confirmed -> "OK: ${name(st.action.entityId)} is ${st.state.uppercase()}"
+                is CommandStatus.Accepted -> "OK: ${st.action.label} · ${name(st.action.entityId)} (HA accepted)"
+                is CommandStatus.Unconfirmed -> "Not confirmed: ${name(st.action.entityId)} is ${st.state?.uppercase() ?: "?"}"
+                is CommandStatus.Rejected -> "Blocked: ${st.reason}"
+                is CommandStatus.Unavailable -> "Unavailable: ${st.reason}"
+                is CommandStatus.Failed -> "Failed: ${st.reason}"
+                else -> "Press: ${t.label} · ${name(t.entityId)}"
+            }
+            v.hint != null -> v.hint
+            else -> "Press: ${t.label} · ${name(t.entityId)}"
+        }
     }
 
     private fun noticeText(n: HaNotification): String {

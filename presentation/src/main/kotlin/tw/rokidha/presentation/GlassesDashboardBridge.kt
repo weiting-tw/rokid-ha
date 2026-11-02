@@ -21,6 +21,7 @@ import tw.rokidha.homeassistant.notifications.HaNotification
 import tw.rokidha.homeassistant.selection.GlassesSelection
 import tw.rokidha.presentation.dashboard.DashboardModel
 import tw.rokidha.presentation.dashboard.DashboardRenderer
+import tw.rokidha.presentation.interaction.InteractionView
 
 /**
  * Glasses UI bridge: keeps the glasses dashboard in sync with Home Assistant.
@@ -41,6 +42,7 @@ class GlassesDashboardBridge(
     private val selection: StateFlow<GlassesSelection>,
     private val notifications: StateFlow<List<HaNotification>>,
     private val noticeFor: (nowMs: Long, list: List<HaNotification>) -> HaNotification?,
+    private val interaction: StateFlow<InteractionView?> = MutableStateFlow(null),
     private val renderer: DashboardRenderer = DashboardRenderer(),
     private val clock: () -> Long = System::currentTimeMillis,
     private val minIntervalMs: Long = 500,
@@ -61,7 +63,7 @@ class GlassesDashboardBridge(
         val ticker: Flow<Unit> = flow { while (isActive) { emit(Unit); delay(tickMs) } }
         val ha = combine(haState, entities, lastSyncMs) { s, e, t -> Triple(s, e, t) }
         val ui = combine(selection, notifications, autoShow, ticker) { sel, n, auto, _ -> Triple(sel, n, auto) }
-        combine(display.state, ha, ui) { link, h, u -> Snapshot(link, h.first, h.second, h.third, u.first, u.second, u.third) }
+        combine(display.state, ha, ui, interaction) { link, h, u, i -> Snapshot(link, h.first, h.second, h.third, u.first, u.second, u.third, i) }
             .conflate()
             .collect { snap ->
                 apply(snap)
@@ -77,12 +79,13 @@ class GlassesDashboardBridge(
         val selection: GlassesSelection,
         val notifications: List<HaNotification>,
         val autoShow: Boolean,
+        val interaction: InteractionView?,
     )
 
     private fun apply(s: Snapshot) {
         val now = clock()
         val screen = renderer.render(
-            DashboardModel(s.ha, s.selection.favorites, s.entities, s.lastSyncMs, noticeFor(now, s.notifications)),
+            DashboardModel(s.ha, s.selection.favorites, s.entities, s.lastSyncMs, noticeFor(now, s.notifications), s.interaction),
         )
         val layout = screen.lines.map { it.id }
         val texts = screen.lines.associate { it.id to it.text }

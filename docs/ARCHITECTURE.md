@@ -133,10 +133,11 @@ stateDiagram-v2
 - HA 離線：狀態行 `HA OFFLINE · reconnecting`、數值加 `~` 前綴、頁尾 `Not live · last data …`；未設定 / 已登出 / token 被拒：數值隱藏。
 - 通知：HIGH 立即顯示 15 分鐘、MEDIUM 5 分鐘、LOW 只在手機顯示。
 
-### 5.4 互動
+### 5.4 互動（眼鏡 → 手機 → HA）
 
-CustomView 沒有輸入事件（DOCUMENTED）。快速操作在手機上執行，必須是使用者設定的 quick action（= allowlist），
-且屬於 `ServiceCatalog`；lock / cover 需要確認對話框。眼鏡端按鍵 / 觸控板需 CXR-S CustomApp（P5，未實作）。IMU 無 SDK API（P6）。
+所有命令（手機按鈕、眼鏡輸入、未來 AI）都經過同一個 `ActionDispatcher`：allowlist → HA 已連線 → 實體存在且可用 → 同實體無進行中命令 → `call_service` → 等待確認的 `state_changed`。
+眼鏡輸入（`GlassesInput`，僅 PRIMARY/NEXT/PREVIOUS/SELECT/BACK，不含實體或服務）由 `GlassesInteractionController` 處理：`InputGate` 去重 / 去抖 / 丟棄過期事件，兩段式確認，HA 或眼鏡斷線即解除 armed。
+CXR-L 唯一可用的眼鏡輸入是 AI 鍵 / 喚醒回呼（EXPERIMENTAL）；鏡腿按鍵與觸控板需 CXR-S CustomApp（未實作）。詳見 [GLASSES_CONTROL.md](GLASSES_CONTROL.md)。
 
 ### 5.5 安全
 
