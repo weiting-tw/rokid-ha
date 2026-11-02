@@ -11,6 +11,14 @@ val releaseKeystore: String? = System.getenv("ROKIDHA_KEYSTORE_FILE")?.takeIf { 
 val hasReleaseSigning = releaseKeystore != null && file(releaseKeystore).exists() &&
     listOf("ROKIDHA_KEYSTORE_PASSWORD", "ROKIDHA_KEY_ALIAS", "ROKIDHA_KEY_PASSWORD").all { !System.getenv(it).isNullOrEmpty() }
 
+// Fixed DEBUG signing key (optional). Android only installs an update over an existing app when
+// both are signed with the same key; the default debug key is generated per machine, so every CI
+// runner (and every developer) would produce a different signature. CI decodes the shared debug
+// keystore from the ANDROID_DEBUG_KEYSTORE_BASE64 secret. Password/alias default to the standard
+// Android debug values. Without the variable, the machine's default debug key is used.
+val debugKeystore: String? = System.getenv("ROKIDHA_DEBUG_KEYSTORE_FILE")?.takeIf { it.isNotBlank() && file(it).exists() }
+fun envOr(name: String, default: String): String = System.getenv(name)?.takeIf { it.isNotEmpty() } ?: default
+
 android {
     namespace = "tw.rokidha.app"
     compileSdk = 35
@@ -25,6 +33,14 @@ android {
     }
 
     signingConfigs {
+        if (debugKeystore != null) {
+            getByName("debug") {
+                storeFile = file(debugKeystore)
+                storePassword = envOr("ROKIDHA_DEBUG_KEYSTORE_PASSWORD", "android")
+                keyAlias = envOr("ROKIDHA_DEBUG_KEY_ALIAS", "androiddebugkey")
+                keyPassword = envOr("ROKIDHA_DEBUG_KEY_PASSWORD", "android")
+            }
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseKeystore!!)

@@ -205,8 +205,32 @@ The APK runs on ARM phones only (Rokid native libraries are arm64-v8a / armeabi-
 
 GitHub → **Actions** → **CI** → pick a run → section **Artifacts** → `rokid-ha-debug-apk`
 (zip with `rokid-ha-debug-<sha>.apk` and its `.sha256`). Kept 14 days. With the GitHub CLI:
-`gh run download <run-id> -n rokid-ha-debug-apk`. Debug APKs are signed with the throwaway debug key
-and are for testing only.
+`gh run download <run-id> -n rokid-ha-debug-apk`. Debug APKs are for testing only.
+
+### Fixed debug signing key (install updates without uninstalling)
+
+Android installs an APK over an existing app only if both are signed with the **same key**. Without
+configuration every CI runner signs debug builds with a new random key, so each build must be
+uninstalled first (which also deletes the saved HA token). To keep one debug signature:
+
+1. Create a dedicated debug keystore once (standard debug passwords; it is not your release key):
+   ```bash
+   keytool -genkeypair -v -keystore rokid-ha-debug.keystore -storetype PKCS12 \
+     -alias androiddebugkey -storepass android -keypass android \
+     -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Rokid HA Debug"
+   base64 -w0 rokid-ha-debug.keystore > debug.b64      # macOS: base64 -i rokid-ha-debug.keystore -o debug.b64
+   ```
+2. GitHub → **Settings → Secrets and variables → Actions → New repository secret**:
+   `ANDROID_DEBUG_KEYSTORE_BASE64` = contents of `debug.b64`.
+   Only needed if you chose other values: `ANDROID_DEBUG_KEYSTORE_PASSWORD`, `ANDROID_DEBUG_KEY_ALIAS`,
+   `ANDROID_DEBUG_KEY_PASSWORD` (defaults: `android` / `androiddebugkey` / `android`).
+3. Keep `rokid-ha-debug.keystore` somewhere safe (not in the repository), delete `debug.b64`.
+4. Uninstall the old app **once**, then install the next CI build. From then on, CI debug builds
+   install as updates. The run summary shows the certificate SHA-256 and whether the fixed key was used.
+
+To build locally with the same signature: `ROKIDHA_DEBUG_KEYSTORE_FILE=/path/rokid-ha-debug.keystore ./gradlew assembleDebug`.
+Debug and release builds use different keys and share the same application id, so switching
+between a debug and a release build always requires uninstalling.
 
 ### Configure Android signing secrets
 
