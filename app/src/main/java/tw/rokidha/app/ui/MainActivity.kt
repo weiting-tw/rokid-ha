@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import tw.rokidha.app.RokidHaApplication
 import tw.rokidha.app.service.HaConnectionService
 
@@ -58,6 +59,12 @@ class MainActivity : ComponentActivity() {
                     },
                 ) { padding ->
                     Box(Modifier.fillMaxSize().padding(padding)) {
+                        // Build identity, so testers can confirm which version is installed.
+                        Text(
+                            "v${tw.rokidha.app.BuildConfig.VERSION_NAME}",
+                            Modifier.align(androidx.compose.ui.Alignment.TopEnd).padding(end = 8.dp, top = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
                         when (tab) {
                             TAB_SETUP -> SetupScreen()
                             TAB_ENTITIES -> EntitiesScreen()

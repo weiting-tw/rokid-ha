@@ -19,6 +19,12 @@ val hasReleaseSigning = releaseKeystore != null && file(releaseKeystore).exists(
 val debugKeystore: String? = System.getenv("ROKIDHA_DEBUG_KEYSTORE_FILE")?.takeIf { it.isNotBlank() && file(it).exists() }
 fun envOr(name: String, default: String): String = System.getenv(name)?.takeIf { it.isNotEmpty() } ?: default
 
+// Build identity shown in the app, so testers can see which build is installed.
+val gitSha: String = providers.exec { commandLine("git", "rev-parse", "--short=7", "HEAD"); isIgnoreExitValue = true }
+    .standardOutput.asText.get().trim().ifEmpty { "unknown" }
+val gitCount: Int = providers.exec { commandLine("git", "rev-list", "--count", "HEAD"); isIgnoreExitValue = true }
+    .standardOutput.asText.get().trim().toIntOrNull() ?: 1
+
 android {
     namespace = "tw.rokidha.app"
     compileSdk = 35
@@ -28,8 +34,10 @@ android {
         minSdk = 31
         targetSdk = 35
         // CI passes these from the git tag (release.yml); local builds use the defaults.
-        versionCode = providers.gradleProperty("rokidha.versionCode").orNull?.toInt() ?: 1
-        versionName = providers.gradleProperty("rokidha.versionName").orNull ?: "0.1.0-dev"
+        // Release tags pass these explicitly; otherwise the commit count increases with every commit.
+        versionCode = providers.gradleProperty("rokidha.versionCode").orNull?.toInt() ?: gitCount
+        versionName = providers.gradleProperty("rokidha.versionName").orNull ?: "0.1.0-dev.$gitCount+$gitSha"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
     }
 
     signingConfigs {
@@ -64,7 +72,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 // The glasses CustomApp (CXR-S) is bundled as an asset; the phone installs it on the glasses
