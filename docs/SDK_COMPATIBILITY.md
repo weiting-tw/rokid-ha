@@ -97,9 +97,10 @@
 | 8 行文字 Dashboard 的可讀性 / 可視區域 | UNKNOWN | 行數、字級、中文顯示待 V-11 |
 | 在眼鏡上顯示 HA 通知 | DOCUMENTED | 以 Dashboard 的一行文字呈現（無彈窗能力） |
 | 從眼鏡本身觸發控制 | UNSUPPORTED（CustomView 本身） | CustomView 無輸入事件 |
-| AI 鍵 / 喚醒 → 手機（`onGlassAiAssistStart`、`onGlassAiInterrupt`） | DOCUMENTED（回呼）／EXPERIMENTAL（作為控制輸入） | 已實作為單鍵 PRIMARY 輸入（預設關閉，兩段式確認）；未實機驗證，見 GLASSES_CONTROL.md |
+| AI 鍵 / 喚醒 → 手機（`onGlassAiAssistStart`、`onGlassAiInterrupt`） | DOCUMENTED（回呼）／**首次實機測試失敗**（2026-11-02，使用者回報，無 log，原因未確認） | 不再作為控制入口；保留為預設關閉的診斷選項 |
 | `setInterruptAiWake`（抑制 Rokid 助理） | EXPERIMENTAL | 二進位存在、文件未記載；可選開關 |
-| 鏡腿按鍵 / 觸控板事件 → 手機 | DOCUMENTED（僅經 CXR-S 眼鏡端 CustomApp 轉送） | 需第二個 APK；未實作，待核准 |
+| 鏡腿按鍵 / 觸控板事件 → 手機 | DOCUMENTED（經 CXR-S 眼鏡端 CustomApp） | 已實作 `rokid-ha-glasses.apk` + 手機 CUSTOMAPP 模式（使用者已核准）；**未實機驗證**，見 GLASSES_CONTROL.md §9、檢查表 §G |
+| 手機經 CXR-L 安裝眼鏡端 APK（無 ADB） | DOCUMENTED | `appUploadAndInstall`；未實機驗證 |
 | 語音辨識結果 → 手機 | UNKNOWN（CXR-L 無 API） | 只有原始 PCM 音訊串流（DOCUMENTED） |
 | 手機端命令管線（allowlist、去重、無重送、狀態確認） | SIMULATED | `CommandPipelineTest` 15 項 |
 | 眼鏡掃描 QR Code | UNKNOWN | CXR-L 只有 `takePhoto`，無 QR 解碼；未實作也未計畫 |

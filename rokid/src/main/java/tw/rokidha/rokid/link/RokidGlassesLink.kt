@@ -7,7 +7,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import com.rokid.cxr.link.CXRLink
+import com.rokid.cxr.Caps
 import com.rokid.cxr.link.callbacks.ICXRLinkCbk
+import com.rokid.cxr.link.callbacks.ICustomCmdCbk
+import com.rokid.cxr.link.callbacks.IGlassAppCbk
 import com.rokid.cxr.link.callbacks.ICustomViewCbk
 import com.rokid.cxr.link.utils.CxrDefs
 import com.rokid.cxr.link.utils.GlassInfo
@@ -33,6 +36,8 @@ import tw.rokidha.rokid.customview.CustomViewNode
 import tw.rokidha.rokid.customview.CustomViewUpdate
 import tw.rokidha.rokid.customview.CustomViewValidator
 import tw.rokidha.rokid.customview.DisplayScreenRenderer
+import tw.rokidha.glassesproto.GlassesProtocol
+import java.io.File
 
 /**
  * Rokid CXR-L adapter (CUSTOMVIEW session only, P0 scope).
@@ -86,6 +91,35 @@ class RokidGlassesLink(
     /** Forward AI key / wake events as [GlassesInput.Kind.PRIMARY]. Off by default. */
     @Volatile var aiKeyInputEnabled: Boolean = false
     private val inputSeq = java.util.concurrent.atomic.AtomicLong()
+
+    /**
+     * How the glasses are driven. Applies at the next [connect] (CXR-L fixes the session type per link).
+     * - CUSTOM_VIEW: phone renders a CustomView JSON layout; no glasses input (default, P0 path).
+     * - CUSTOM_APP: the Rokid HA glasses app (CXR-S) renders frames sent over custom commands and
+     *   reports button/touchpad input. DOCUMENTED by Rokid; not yet verified on the target glasses.
+     */
+    enum class SessionMode { CUSTOM_VIEW, CUSTOM_APP }
+
+    @Volatile var sessionMode: SessionMode = SessionMode.CUSTOM_VIEW
+    @Volatile private var activeMode: SessionMode = SessionMode.CUSTOM_VIEW
+    val activeSessionMode: SessionMode get() = activeMode
+
+    private val _glassesAppInstalled = MutableStateFlow<Boolean?>(null)
+    /** CUSTOM_APP: result of `appIsInstalled` (null = unknown). */
+    val glassesAppInstalled: StateFlow<Boolean?> = _glassesAppInstalled.asStateFlow()
+
+    private val _lastGlassesEvent = MutableStateFlow<String?>(null)
+    /** CUSTOM_APP: last raw input name reported by the glasses app (diagnostics for verification). */
+    val lastGlassesEvent: StateFlow<String?> = _lastGlassesEvent.asStateFlow()
+
+    // CUSTOM_APP display state (guarded by `this`).
+    private var appRunning = false
+    private var userExitedApp = false
+    private var appStartRequestedAt = 0L
+    private var screenShown = false
+    private var currentScreen: DisplayScreen? = null
+    private var frameRev = 0L
+    private val lastGlassesSeq = HashMap<String, Long>()
 
     @Volatile private var link: CXRLink? = null
     @Volatile private var token: String? = null
@@ -183,16 +217,25 @@ class RokidGlassesLink(
             return failFalse("connect: CXRLink() threw ${t2.javaClass.simpleName}: ${t2.message}")
         }
 
-        val configured = l.configCXRSession(CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMVIEW))
-        log("session: configCXRSession(CUSTOMVIEW) -> $configured")
+        val mode = sessionMode
+        val session = if (mode == SessionMode.CUSTOM_APP) {
+            CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMAPP, GlassesProtocol.GLASSES_PACKAGE)
+        } else {
+            CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMVIEW)
+        }
+        val configured = l.configCXRSession(session)
+        log("session: configCXRSession(${session.sessionType}) -> $configured")
         if (!configured) {
             l.disconnect()
-            return failFalse("session: configCXRSession(CUSTOMVIEW) returned false")
+            return failFalse("session: configCXRSession(${session.sessionType}) returned false")
         }
+        activeMode = mode
+        resetCustomAppState()
         // Both callbacks MUST be set before connect(): the SDK dereferences them without null
         // checks when the service binds (observed in client-l bytecode, docs/SDK_RESEARCH.md §8).
         l.setCXRLinkCbk(linkCallback)
         l.setCXRCustomViewCbk(customViewCallback)
+        l.setCXRCustomCmdCbk(customCmdCallback)
 
         link = l
         _state.update { it.copy(stage = Stage.CONNECTING, lastError = null) }
@@ -212,9 +255,11 @@ class RokidGlassesLink(
             log("link: disconnect ignored, no link")
             return
         }
-        if (_state.value.displayOpen) {
+        if (_state.value.displayOpen && activeMode == SessionMode.CUSTOM_VIEW) {
             log("view: customViewClose() before disconnect -> ${runCatching { l.customViewClose() }.getOrDefault(false)}")
         }
+        // CUSTOM_APP: the glasses app is left running; it shows "PHONE DISCONNECTED" by itself.
+        resetCustomAppState()
         runCatching { l.disconnect() }.onFailure { log("link: disconnect threw ${it.message}") }
         link = null
         openTree = null
@@ -239,7 +284,8 @@ class RokidGlassesLink(
 
     // ---------------------------------------------------------------- display (GlassesDisplayPort)
 
-    override fun show(screen: DisplayScreen): Boolean = openTree(renderer.render(screen))
+    override fun show(screen: DisplayScreen): Boolean =
+        if (activeMode == SessionMode.CUSTOM_APP) appShow(screen) else openTree(renderer.render(screen))
 
     /** Opens an arbitrary validated CustomView tree. */
     fun openTree(tree: CustomViewNode): Boolean {
@@ -262,6 +308,7 @@ class RokidGlassesLink(
     }
 
     override fun updateText(changes: Map<String, String>): Boolean {
+        if (activeMode == SessionMode.CUSTOM_APP) return appUpdate(changes)
         val l = link ?: return failFalse("view: update rejected, not connected")
         val tree = openTree ?: return failFalse("view: update rejected, no open tree")
         if (!_state.value.displayOpen) return failFalse("view: update rejected, view not open")
@@ -277,6 +324,7 @@ class RokidGlassesLink(
     }
 
     override fun hide(): Boolean {
+        if (activeMode == SessionMode.CUSTOM_APP) return appHide()
         val l = link ?: return failFalse("view: close rejected, not connected")
         val ok = runCatching { l.customViewClose() }.getOrElse {
             return failFalse("view: customViewClose threw ${it.message}")
@@ -306,6 +354,7 @@ class RokidGlassesLink(
                 )
             }
             if (connected && bt) refreshDeviceInfo()
+            onLinkStateChanged()
         }
 
         override fun onGlassBtConnected(connected: Boolean) {
@@ -314,6 +363,7 @@ class RokidGlassesLink(
                 recompute(it.copy(glassesConnected = connected, displayOpen = if (connected) it.displayOpen else false))
             }
             if (connected) refreshDeviceInfo()
+            onLinkStateChanged()
         }
 
         override fun onGlassDeviceInfo(info: GlassInfo) {
@@ -371,6 +421,216 @@ class RokidGlassesLink(
         }
     }
 
+    // ---------------------------------------------------------------- CUSTOM_APP (CXR-S glasses app)
+
+    /**
+     * Installs the bundled glasses APK through the Rokid app (no ADB). The SDK opens [apk] in this
+     * process and passes a file descriptor, so an app-private path works.
+     */
+    fun installGlassesApp(apk: File): Boolean {
+        val l = link ?: return failFalse("app: install rejected, not connected")
+        if (activeMode != SessionMode.CUSTOM_APP) return failFalse("app: install needs the CustomApp session mode")
+        if (!_state.value.linkReady) return failFalse("app: install rejected, link not ready")
+        if (!apk.isFile || !apk.canRead()) return failFalse("app: APK not readable: ${apk.name}")
+        log("app: appUploadAndInstall(${apk.name}, ${apk.length()} bytes)")
+        runCatching { l.appUploadAndInstall(apk.absolutePath, appCallback) }.onFailure { return failFalse("app: install threw ${it.message}") }
+        return true
+    }
+
+    /** Starts (or re-opens after the user left it) the glasses app. */
+    @Synchronized
+    fun openGlassesApp(): Boolean {
+        userExitedApp = false
+        return startGlassesApp(force = true)
+    }
+
+    @Synchronized
+    private fun startGlassesApp(force: Boolean): Boolean {
+        val l = link ?: return false
+        if (activeMode != SessionMode.CUSTOM_APP || !_state.value.linkReady) return false
+        if (_glassesAppInstalled.value == false) return failFalse("app: glasses app not installed — install it from the Glasses tab")
+        val now = System.currentTimeMillis()
+        if (!force && now - appStartRequestedAt < APP_START_TIMEOUT_MS) return true // already starting
+        appStartRequestedAt = now
+        log("app: appStart(${GlassesProtocol.GLASSES_ENTRY})")
+        runCatching { l.appStart(GlassesProtocol.GLASSES_ENTRY, appCallback) }.onFailure { return failFalse("app: appStart threw ${it.message}") }
+        return true
+    }
+
+    private fun onLinkStateChanged() {
+        if (activeMode != SessionMode.CUSTOM_APP) return
+        val ready = _state.value.linkReady
+        synchronized(this) {
+            if (!ready) {
+                appRunning = false
+                screenShown = false
+                return
+            }
+        }
+        // Link (re)established: check the glasses app; onQueryAppResult starts it when installed.
+        runCatching { link?.appIsInstalled(appCallback) }.onFailure { log("app: appIsInstalled threw ${it.message}") }
+    }
+
+    @Synchronized
+    private fun appShow(screen: DisplayScreen): Boolean {
+        if (!_state.value.linkReady) return false
+        currentScreen = screen
+        if (appRunning) return sendFrame()
+        if (userExitedApp) return false // user left the app on the glasses; reopen from the phone
+        return startGlassesApp(force = false) // frame is sent once the app reports open/hello
+    }
+
+    @Synchronized
+    private fun appUpdate(changes: Map<String, String>): Boolean {
+        val s = currentScreen ?: return false
+        if (!screenShown) return false
+        currentScreen = s.copy(lines = s.lines.map { l -> changes[l.id]?.let { l.copy(text = it) } ?: l })
+        return sendFrame()
+    }
+
+    @Synchronized
+    private fun appHide(): Boolean {
+        // The glasses app keeps running; the next show() replaces its content.
+        screenShown = false
+        _state.update { recompute(it.copy(displayOpen = false)) }
+        return true
+    }
+
+    /** Sends the current screen as one frame. Caller holds the lock. */
+    private fun sendFrame(): Boolean {
+        val l = link ?: return false
+        val screen = currentScreen ?: return false
+        val frame = GlassesProtocol.UiFrame(
+            rev = ++frameRev,
+            lines = screen.lines.map { GlassesProtocol.Line(it.id, it.text, it.style.name) },
+            status = "",
+        )
+        val caps = Caps()
+        GlassesProtocol.encode(frame).forEach { v -> if (v is String) caps.write(v) else if (v is Long) caps.writeInt64(v) }
+        // Deprecated in client-l with "Attention to Caps size"; it is the call the official docs use.
+        // Frames are capped by GlassesProtocol (16 lines x 160 chars).
+        @Suppress("DEPRECATION")
+        val rc = runCatching { l.sendCustomCmd(GlassesProtocol.CH_TO_GLASSES, caps) }.getOrElse {
+            return failFalse("app: sendCustomCmd threw ${it.message}")
+        }
+        if (rc == null || rc < 0) return failFalse("app: sendCustomCmd -> $rc")
+        if (!screenShown) {
+            screenShown = true
+            _state.update { recompute(it.copy(displayOpen = true, lastError = null)) }
+        }
+        return true
+    }
+
+    @Synchronized
+    private fun resetCustomAppState() {
+        appRunning = false
+        screenShown = false
+        userExitedApp = false
+        appStartRequestedAt = 0L
+        currentScreen = null
+        lastGlassesSeq.clear()
+        _glassesAppInstalled.value = null
+    }
+
+    private val appCallback = object : IGlassAppCbk {
+        override fun onQueryAppResult(installed: Boolean) {
+            log("cb: onQueryAppResult(installed=$installed)")
+            _glassesAppInstalled.value = installed
+            if (installed) synchronized(this@RokidGlassesLink) { if (!appRunning && !userExitedApp) startGlassesApp(force = false) }
+        }
+
+        override fun onInstallAppResult(success: Boolean) {
+            log("cb: onInstallAppResult($success)")
+            if (success) {
+                _glassesAppInstalled.value = true
+                openGlassesApp()
+            } else {
+                fail("app: installation on the glasses failed")
+            }
+        }
+
+        override fun onUnInstallAppResult(success: Boolean) = log("cb: onUnInstallAppResult($success)")
+
+        override fun onOpenAppResult(success: Boolean) {
+            log("cb: onOpenAppResult($success)")
+            synchronized(this@RokidGlassesLink) {
+                appStartRequestedAt = 0L
+                appRunning = success
+                if (success && currentScreen != null) sendFrame()
+            }
+            if (!success) fail("app: the glasses app could not be started")
+        }
+
+        override fun onStopAppResult(success: Boolean) {
+            log("cb: onStopAppResult($success)")
+            if (success) markAppGone(userLeft = false)
+        }
+
+        override fun onGlassAppResume(resumed: Boolean) {
+            log("cb: onGlassAppResume($resumed)")
+            if (resumed) {
+                synchronized(this@RokidGlassesLink) {
+                    appRunning = true
+                    userExitedApp = false
+                    if (currentScreen != null) sendFrame()
+                }
+            } else {
+                markAppGone(userLeft = true) // e.g. double-click exit: do not relaunch automatically
+            }
+        }
+    }
+
+    private fun markAppGone(userLeft: Boolean) {
+        synchronized(this) {
+            appRunning = false
+            screenShown = false
+            if (userLeft) userExitedApp = true
+        }
+        _state.update { recompute(it.copy(displayOpen = false)) }
+    }
+
+    private val customCmdCallback = ICustomCmdCbk { name, payload ->
+        if (name != GlassesProtocol.CH_TO_PHONE || payload == null) return@ICustomCmdCbk
+        val fields = runCatching { readCaps(Caps.fromBytes(payload)) }.getOrNull() ?: return@ICustomCmdCbk
+        when (val m = GlassesProtocol.decode(fields)) {
+            is GlassesProtocol.Hello -> {
+                log("glasses: hello (session ${m.session})")
+                synchronized(this) {
+                    appRunning = true
+                    userExitedApp = false
+                    if (currentScreen != null) sendFrame()
+                }
+            }
+            is GlassesProtocol.InputEvent -> onGlassesInput(m)
+            else -> log("glasses: ignored malformed message on $name")
+        }
+    }
+
+    private fun onGlassesInput(e: GlassesProtocol.InputEvent) {
+        synchronized(this) {
+            val last = lastGlassesSeq[e.session]
+            if (last != null && e.seq <= last) {
+                log("glasses: duplicate input #${e.seq} dropped")
+                return
+            }
+            lastGlassesSeq[e.session] = e.seq
+        }
+        _lastGlassesEvent.value = "${e.raw} → ${e.kind ?: "(not mapped)"}"
+        log("glasses: input ${e.raw} → ${e.kind ?: "not mapped"} (#${e.seq})")
+        val kind = e.kind ?: return
+        _inputs.tryEmit(GlassesInput(kind, GlassesInput.Source.CXRS_CUSTOM_APP, System.currentTimeMillis(), inputSeq.incrementAndGet()))
+    }
+
+    private fun readCaps(c: Caps): List<Any?> = (0 until c.size()).map { i ->
+        val v = c.at(i)
+        when (v.type()) {
+            Caps.Value.TYPE_STRING -> v.string
+            Caps.Value.TYPE_INT64, Caps.Value.TYPE_UINT64 -> v.long
+            Caps.Value.TYPE_INT32, Caps.Value.TYPE_UINT32 -> v.int.toLong()
+            else -> null
+        }
+    }
+
     private fun emitAiKey() {
         if (!aiKeyInputEnabled) return
         // One press may arrive through both callbacks; the interaction layer debounces.
@@ -422,6 +682,7 @@ class RokidGlassesLink(
 
     companion object {
         private const val TAG = "RokidGlassesLink"
+        private const val APP_START_TIMEOUT_MS = 15_000L
         private val SN_FIELD = Regex("sn='[^']*'")
     }
 }

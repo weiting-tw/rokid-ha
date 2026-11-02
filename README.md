@@ -27,7 +27,7 @@ Rokid Glasses ──CXR-L──▶ Android Companion App ──HTTPS/WSS──�
 | mDNS discovery (`_home-assistant._tcp`) | Implemented (Android NsdManager); parser unit-tested; **real-network behaviour untested** |
 | Entity selection, quick actions, service allowlist | Implemented, unit-tested |
 | Glasses dashboard sync (auto-open, live updates, offline state, notifications) | Implemented and tested with a fake display; **on-glasses rendering is DOCUMENTED, not VERIFIED** |
-| Controls from the glasses themselves | AI key (CXR-L) as single input with two-step confirm — implemented, opt-in, **EXPERIMENTAL, not verified on glasses**; pipeline SIMULATED-tested. Buttons/touchpad need CXR-S (not implemented). See [docs/GLASSES_CONTROL.md](docs/GLASSES_CONTROL.md) |
+| Controls from the glasses themselves | **Glasses app (CXR-S)** with temple button / touchpad input — implemented, installed from the phone, **not yet verified on the glasses**. The CXR-L AI-key route did not work in the first test and is only a diagnostic option. See [docs/GLASSES_CONTROL.md](docs/GLASSES_CONTROL.md) |
 | QR pairing | Design only — [docs/QR_PAIRING.md](docs/QR_PAIRING.md) |
 | Background operation | Foreground-service option + reconnect hooks — [docs/BACKGROUND_OPERATION.md](docs/BACKGROUND_OPERATION.md) |
 
@@ -99,13 +99,17 @@ Requirements: ARM Android phone, Android 12+, **Rokid AI App ≥ 1.9.0** (mainla
    actions allowed for each. Nothing is shown on the glasses until you select it.
 4. Quick action buttons on the Glasses tab call the allowlisted services; locks and covers ask for
    confirmation first.
-5. **Glasses control (experimental):** Glasses tab → *Use glasses AI key as input*, pick the
-   *Glasses target* (one of your quick actions). On the glasses, press the AI key once (the dashboard
-   shows `Confirm … Press again`), press again within 5 s to send. The result line shows
-   `Sending… → Waiting for HA… → OK: … is OFF` only after Home Assistant reports the new state, or
-   `Failed / Blocked / Unavailable`. This is the only glasses input CXR-L provides. It may also be
-   triggered by the wake word and may open the Rokid assistant; it is **not yet verified** on the
-   Founder Edition. The *Input simulator* buttons test the same pipeline from the phone (simulated).
+5. **Glasses control with the glasses app (experimental, CXR-S):** Glasses tab → *Glasses mode* =
+   *Glasses app (CXR-S)* → *Disconnect* / *Connect glasses* → *Install glasses app* (the phone
+   installs the bundled `rokid-ha-glasses.apk` on the glasses through the Rokid app — no ADB).
+   Turn on *Allow glasses input to control Home Assistant* and pick the *Glasses target*.
+   On the glasses: **temple click** (or two-finger tap) = select, **two-finger swipe** forward/back =
+   next/previous target, **long press** = back. Select once to arm (`Confirm … Press again`), select
+   again within 5 s to send. The result shows `OK: … is OFF` only after Home Assistant reports the
+   new state. Double-click exits the glasses app (system behaviour); *Open on glasses* brings it back.
+   The glasses app shows `PHONE DISCONNECTED` when the phone link drops. Not yet verified on the
+   Founder Edition — please run docs/DEVICE_VERIFICATION_CHECKLIST.md §G.
+   The CXR-L **AI key** option did not work in the first hardware test and is kept only for diagnostics.
 
 If Home Assistant is unreachable, the glasses show `HA OFFLINE · reconnecting`, cached values are
 prefixed with `~`, and the footer says `Not live · last data HH:MM:SS`. After *Disconnect* or a
@@ -176,7 +180,9 @@ homeassistant/  Pure Kotlin HA client: URL policy, REST, WebSocket, connection m
                 credential store logic, selection + service allowlist  (no Android, no Rokid)
 presentation/   Glasses UI bridge + dashboard renderer + notification priorities  (no Android, no Rokid)
 data/           Android implementations: Keystore cipher, SharedPreferences, NsdManager discovery
-rokid/          Rokid CXR-L adapter — the ONLY module importing com.rokid.*
+rokid/          Rokid CXR-L adapter (CustomView + CustomApp sessions) — phone side of com.rokid.*
+glassesapp/     Glasses app (CXR-S): displays frames, reports button/touchpad input; bundled into the phone APK
+glassesproto/   Versioned phone <-> glasses message format and key mapping (pure Kotlin)
 domain/         Shared ports (GlassesDisplayPort, DisplayScreen, GlassesLinkState)
 docs/           SDK research, compatibility, architecture, background, QR design, device checklist
 ```

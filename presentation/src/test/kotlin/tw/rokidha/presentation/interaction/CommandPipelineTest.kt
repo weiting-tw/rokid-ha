@@ -240,4 +240,20 @@ class CommandPipelineTest {
         Thread.sleep(300)
         assertTrue(ha.serviceCalls.isEmpty())
     }
+
+    @Test fun `glasses-app buttons (CXR-S source) navigate and confirm through the same gate`() = runBlocking {
+        fun cxrs(kind: Kind) = GlassesInput(kind, GlassesInput.Source.CXRS_CUSTOM_APP, System.currentTimeMillis(), ++seq)
+        controller.onInput(cxrs(Kind.NEXT)) // two-finger swipe forward → "On · Living Light"
+        eventually { controller.view.value?.target?.service == "turn_on" }
+        ha.setState("light.living_room", "off", mapOf("friendly_name" to "Living Light"))
+        controller.onInput(cxrs(Kind.SELECT)) // temple click → arm
+        eventually { controller.view.value?.armedUntilMs != null }
+        Thread.sleep(450)
+        controller.onInput(cxrs(Kind.SELECT)) // second click → send
+        eventually { dispatcher.status.value?.isTerminal == true }
+        assertEquals(JsonPrimitive("turn_on"), lightCalls().single()["service"])
+        controller.onInput(cxrs(Kind.BACK)) // long press → nothing sent
+        Thread.sleep(200)
+        assertEquals(1, lightCalls().size)
+    }
 }

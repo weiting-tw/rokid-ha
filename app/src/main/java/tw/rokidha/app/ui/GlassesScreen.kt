@@ -112,6 +112,17 @@ class GlassesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setControl(on: Boolean) { c.glassesControlEnabled = on; _control.value = on }
     fun setSuppress(on: Boolean) { c.suppressRokidAssistant = on; _suppress.value = on }
+    private val _aiKey = MutableStateFlow(c.aiKeyInput)
+    val aiKey = _aiKey.asStateFlow()
+    fun setAiKey(on: Boolean) { c.aiKeyInput = on; _aiKey.value = on }
+    private val _mode = MutableStateFlow(c.glassesMode)
+    val mode = _mode.asStateFlow()
+    fun setMode(m: RokidGlassesLink.SessionMode) { c.glassesMode = m; _mode.value = m }
+    fun activeMode() = c.glasses.activeSessionMode
+    val glassesAppInstalled = c.glasses.glassesAppInstalled
+    val lastGlassesEvent = c.glasses.lastGlassesEvent
+    fun installGlassesApp() { c.installGlassesApp() }
+    fun openGlassesApp() { c.glasses.openGlassesApp() }
     fun selectTarget(id: String) = c.interaction.selectTarget(id)
     fun simulate(kind: GlassesInput.Kind) = c.simulateInput(kind)
 
@@ -143,6 +154,10 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
     val iv by vm.interaction.collectAsStateWithLifecycle()
     val control by vm.control.collectAsStateWithLifecycle()
     val suppress by vm.suppress.collectAsStateWithLifecycle()
+    val aiKey by vm.aiKey.collectAsStateWithLifecycle()
+    val mode by vm.mode.collectAsStateWithLifecycle()
+    val installed by vm.glassesAppInstalled.collectAsStateWithLifecycle()
+    val lastEvent by vm.lastGlassesEvent.collectAsStateWithLifecycle()
     val status by vm.commandStatus.collectAsStateWithLifecycle()
     val ents by vm.entities.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf<QuickAction?>(null) }
@@ -161,11 +176,35 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
                 Text("Home Assistant: ${ha.describe().lineSequence().first()}")
             }
         }
+        Text("Glasses mode (applies at next Connect)", fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(mode == RokidGlassesLink.SessionMode.CUSTOM_VIEW, { vm.setMode(RokidGlassesLink.SessionMode.CUSTOM_VIEW) })
+            Text("CustomView — display only")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(mode == RokidGlassesLink.SessionMode.CUSTOM_APP, { vm.setMode(RokidGlassesLink.SessionMode.CUSTOM_APP) })
+            Text("Glasses app (CXR-S) — display + buttons/touchpad (experimental)")
+        }
+        if (vm.activeMode() != mode && link.stage != GlassesLinkState.Stage.IDLE && link.stage != GlassesLinkState.Stage.AUTHORIZED) {
+            Text("Disconnect and connect again to switch mode.", color = MaterialTheme.colorScheme.error)
+        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { vm.connectGlasses(context as Activity) }, enabled = link.stage != GlassesLinkState.Stage.AUTHORIZING && !link.linkReady) {
                 Text("Connect glasses")
             }
             OutlinedButton(onClick = vm::disconnectGlasses) { Text("Disconnect glasses") }
+        }
+        if (vm.activeMode() == RokidGlassesLink.SessionMode.CUSTOM_APP && link.linkReady) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("Glasses app: " + when (installed) { true -> "installed"; false -> "not installed"; null -> "checking…" })
+                    Text("Last glasses input: ${lastEvent ?: "none yet"}", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = vm::installGlassesApp) { Text(if (installed == true) "Reinstall glasses app" else "Install glasses app") }
+                        OutlinedButton(onClick = vm::openGlassesApp, enabled = installed == true) { Text("Open on glasses") }
+                    }
+                }
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(auto, vm::setAutoShow)
@@ -181,19 +220,23 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
             }
         }
 
-        Text("Glasses control (EXPERIMENTAL)", fontWeight = FontWeight.Bold)
+        Text("Glasses control", fontWeight = FontWeight.Bold)
         Text(
-            "CustomView has no input events. The only glasses input CXR-L delivers is the AI key / wake event. " +
-                "Press once to arm the target below, press again within 5 s to send. The wake word may also trigger it; " +
-                "not yet verified on Founder Edition firmware 1.27.009.",
+            "Glasses input arms the target below; a second input within 5 s sends it. Glasses-app mode: " +
+                "temple click / two-finger tap = select, two-finger swipe = next / previous, long press = back. " +
+                "Not yet verified on Founder Edition firmware 1.27.009.",
             style = MaterialTheme.typography.bodySmall,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(control, vm::setControl)
-            Text("  Use glasses AI key as input", Modifier.padding(start = 8.dp))
+            Text("  Allow glasses input to control Home Assistant", Modifier.padding(start = 8.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(suppress, vm::setSuppress, enabled = control)
+            Switch(aiKey, vm::setAiKey, enabled = control)
+            Text("  Also use AI key (CXR-L; did not work in first test)", Modifier.padding(start = 8.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(suppress, vm::setSuppress, enabled = control && aiKey)
             Text("  Ask Rokid app not to start its assistant (undocumented API)", Modifier.padding(start = 8.dp))
         }
         if (control) {

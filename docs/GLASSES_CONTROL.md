@@ -3,7 +3,12 @@
 Stage report, 2026-11-02. Target: Rokid Glasses Founder Edition, YODAOS-SPRITE, firmware
 `1.27.009-20261014-150203`, phone SDK CXR-L (`client-l` 1.0.4, also compiles with 1.0.3).
 
-**Bottom line**
+**Update (later on 2026-11-02): the user reported that the AI key did not work on the glasses.**
+No event log was captured, so the root cause is not established. The AI-key route is therefore
+**not a usable control input** (kept as an opt-in diagnostic only), and the CXR-S CustomApp route
+(§9) is implemented as the main candidate. It has **not been verified on the glasses** yet.
+
+**Original bottom line (before the hardware test)**
 
 - CXR-L delivers exactly **one** glasses input to a phone app: the AI key / wake callback. It is
   documented as a callback, but **not** as a control input, and it is **not verified on the glasses**.
@@ -174,3 +179,43 @@ end-to-end loop on real glasses is **UNKNOWN**.
   1. Run checklist §F on the Founder Edition and record results.
   2. If the AI key works, keep it as the PoC path. If not, decide on the CXR-S CustomApp (needs approval, dev cable, ADB).
   3. Only then expand the glasses UI (entity navigation screens, device detail).
+
+## 9. Stage 2 — CXR-S glasses CustomApp (implemented, not yet verified on hardware)
+
+Approved by the user after the AI-key failure. Architecture is unchanged: the phone keeps the HA
+connection, token, allowlist and `ActionDispatcher`; the glasses app only displays and reports input.
+
+```
+Rokid glasses: rokid-ha-glasses.apk (CXR-S, tw.rokidha.glasses)
+   temple button / touchpad broadcasts ─▶ sendMessage("rokidha_evt", Caps[in, v1, session, seq, kind, raw])
+   subscribe("rokidha_ui") ◀─ Caps[ui, v1, rev, n, (id,text,style)×n, status] ─▶ draws text lines
+        │  CXR link (Rokid AI App / Hi Rokid)
+Android phone: rokid-ha.apk (CXR-L, CUSTOMAPP session for package tw.rokidha.glasses)
+   ICustomCmdCbk → GlassesProtocol.decode → dedupe (session, seq) → GlassesInput(CXRS_CUSTOM_APP)
+   → GlassesInteractionController → ActionDispatcher → HA → state_changed → DashboardRenderer
+   → sendCustomCmd("rokidha_ui", frame)
+```
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Install glasses app from the phone (`appUploadAndInstall`, APK bundled in the phone app) | DOCUMENTED | No ADB needed: the SDK opens the file in our process and passes a file descriptor ([BIN]). |
+| Start app (`appStart("tw.rokidha.glasses.MainActivity")`), `onOpenAppResult`, `onGlassAppResume` | DOCUMENTED | Not relaunched automatically after the user exits it (double-click); "Open on glasses" on the phone. |
+| Phone → glasses frames (`sendCustomCmd`) / glasses → phone events (`sendMessage`) | DOCUMENTED | `sendCustomCmd(String, Caps)` is marked deprecated ("attention to Caps size"); frames are capped at 16 lines × 160 chars. |
+| Temple click → SELECT, two-finger tap → SELECT, two-finger swipe forward/back → NEXT/PREVIOUS, long press → BACK | DOCUMENTED (broadcasts) | Mapping is ours. Double-click (system exit), AI key and settings key are left to the system. KeyEvents (DPAD/ENTER), if any, are also mapped and reported. |
+| CXR-S bridge version | `1.0-20260417.063502-103` | The version used by the official glasses sample paired with client-l 1.0.4 (`rokid.cxrs.version`). |
+| Works on Founder Edition fw 1.27.009 | UNKNOWN | Checklist §G. |
+| Glasses app shows "PHONE DISCONNECTED" instead of stale data | Implemented | Driven by the CXR-S `StatusListener`. |
+
+Security of the channel: the glasses send only `NEXT/PREVIOUS/SELECT/BACK` plus a raw event name
+for diagnostics (never an entity or service). The phone validates version, field types, sizes and
+allowed kinds, drops duplicates per glasses session, and then applies the same InputGate, two-step
+confirmation and ActionDispatcher checks as every other input. The glasses app has no INTERNET
+permission and never receives the HA URL or token.
+
+Tests (SIMULATED): `glassesproto/.../GlassesProtocolTest` (round trip, rejection of PRIMARY,
+unknown kinds, other versions, oversized frames, key mapping) and
+`CommandPipelineTest."glasses-app buttons (CXR-S source) navigate and confirm through the same gate"`.
+
+Limitations: CustomView and CustomApp cannot be used in the same session; switching modes needs a
+reconnect. Developing the glasses app further without ADB is possible through the phone installer,
+but reading glasses-side logs needs ADB (Rokid app → developer options) and the dev cable.

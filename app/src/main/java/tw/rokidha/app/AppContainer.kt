@@ -91,14 +91,44 @@ class AppContainer(private val app: Application) {
         get() = prefs.getBoolean("keep_connected", false)
         set(v) { prefs.edit().putBoolean("keep_connected", v).apply() }
 
-    /** Glasses control (AI key input). Off by default; EXPERIMENTAL until verified on the glasses. */
+    /** Glasses control: glasses input may trigger quick actions (two-step confirm). Off by default. */
     var glassesControlEnabled: Boolean
         get() = prefs.getBoolean("glasses_control", false)
         set(v) {
             prefs.edit().putBoolean("glasses_control", v).apply()
             interaction.enabled.value = v
+        }
+
+    /** CXR-L AI key as input. Did not work in the first test on the user's glasses (2026-11-02). */
+    var aiKeyInput: Boolean
+        get() = prefs.getBoolean("ai_key_input", false)
+        set(v) {
+            prefs.edit().putBoolean("ai_key_input", v).apply()
             glasses.aiKeyInputEnabled = v
         }
+
+    /** Display/input mode for the next glasses connection (see RokidGlassesLink.SessionMode). */
+    var glassesMode: RokidGlassesLink.SessionMode
+        get() = runCatching { RokidGlassesLink.SessionMode.valueOf(prefs.getString("glasses_mode", null)!!) }
+            .getOrDefault(RokidGlassesLink.SessionMode.CUSTOM_VIEW)
+        set(v) {
+            prefs.edit().putString("glasses_mode", v.name).apply()
+            glasses.sessionMode = v
+        }
+
+    /** Copies the bundled glasses APK to private storage and installs it on the glasses (CUSTOM_APP mode). */
+    fun installGlassesApp(): Boolean {
+        val dir = java.io.File(app.filesDir, "glasses").apply { mkdirs() }
+        val apk = java.io.File(dir, "rokid-ha-glasses.apk")
+        val copied = runCatching {
+            app.assets.open("glasses/rokid-ha-glasses.apk").use { input -> apk.outputStream().use { input.copyTo(it) } }
+        }
+        if (copied.isFailure) {
+            eventLog.add("app: bundled glasses APK missing: ${copied.exceptionOrNull()?.message}")
+            return false
+        }
+        return glasses.installGlassesApp(apk)
+    }
 
     /** Undocumented `setInterruptAiWake`: ask the Rokid app not to handle the AI key itself. */
     var suppressRokidAssistant: Boolean
@@ -113,7 +143,8 @@ class AppContainer(private val app: Application) {
         haManager.notificationEntityId = _selection.value.notificationEntityId
         scope.launch { haManager.notifications.collect(notifications::add) }
         interaction.enabled.value = glassesControlEnabled
-        glasses.aiKeyInputEnabled = glassesControlEnabled
+        glasses.aiKeyInputEnabled = aiKeyInput
+        glasses.sessionMode = glassesMode
         interaction.start(scope)
         scope.launch { glasses.inputs.collect(interaction::onInput) }
         // Re-apply the assistant-interrupt preference each time the glasses link comes up.

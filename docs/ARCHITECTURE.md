@@ -6,7 +6,7 @@
 ## 1. 原則
 
 1. **Home Assistant 是自動化引擎。** 不把 HA automation 搬進 Android。Android 只是橋接層與呈現層。
-2. **Rokid SDK 隔離。** 只有 `:rokid` 模組可以 import `com.rokid.*`。HA、互動、呈現邏輯只依賴 `:domain` 定義的介面。
+2. **Rokid SDK 隔離。** 只有 `:rokid`（手機端）與 `:glassesapp`（眼鏡端）可以 import `com.rokid.*`。HA、互動、呈現邏輯只依賴 `:domain` 定義的介面。
 3. **以驗證為準。** 任何 UI 元件、輸入方式、SDK 行為，必須先在 SDK_COMPATIBILITY.md 標記為 VERIFIED（或至少 DOCUMENTED 且有明確風險註記）才能成為產品功能的依賴。
 4. **安全預設拒絕。** 實體與服務採白名單；安全相關操作一律需要明確確認；AI 只能產生結構化意圖，不能直接執行。
 5. **斷線不重播。** 重連後只重新訂閱與同步狀態，絕不自動重送未完成的控制命令。
@@ -38,6 +38,8 @@ flowchart LR
 | `:presentation` | Kotlin/JVM | Glasses UI Bridge（`GlassesDashboardBridge`）、`DashboardRenderer`、`EntityFormatter`、`NotificationCenter`（優先級） | `:domain`、`:homeassistant` |
 | `:data` | Android library | `KeystoreSecretCipher`（Android Keystore AES-GCM）、`SharedPrefsKeyValueStore`、`NsdHaDiscovery`（NsdManager） | `:homeassistant` |
 | `:rokid` | Android library | Rokid CXR-L adapter：授權、Session、CustomView JSON、`RokidGlassesLink implements GlassesDisplayPort` | `:domain`、`client-l` |
+| `:glassesproto` | Kotlin/JVM | 手機 ↔ 眼鏡 App 訊息格式（版本、大小限制、只允許 NEXT/PREVIOUS/SELECT/BACK）、按鍵對應 | `:domain` |
+| `:glassesapp` | Android app（眼鏡端） | CXR-S：顯示手機送來的文字畫面、回報鏡腿按鍵 / 觸控板；無 INTERNET、無憑證；以 asset 打包進手機 App | `:glassesproto`、`cxr-service-bridge` |
 | `:app` | Android app | 設定 / 實體 / 眼鏡三個畫面、`AppContainer` 組裝、`HaConnectionService` 前景服務、P0 診斷 | 全部 |
 
 依賴方向（不可反向）：
@@ -137,7 +139,7 @@ stateDiagram-v2
 
 所有命令（手機按鈕、眼鏡輸入、未來 AI）都經過同一個 `ActionDispatcher`：allowlist → HA 已連線 → 實體存在且可用 → 同實體無進行中命令 → `call_service` → 等待確認的 `state_changed`。
 眼鏡輸入（`GlassesInput`，僅 PRIMARY/NEXT/PREVIOUS/SELECT/BACK，不含實體或服務）由 `GlassesInteractionController` 處理：`InputGate` 去重 / 去抖 / 丟棄過期事件，兩段式確認，HA 或眼鏡斷線即解除 armed。
-CXR-L 唯一可用的眼鏡輸入是 AI 鍵 / 喚醒回呼（EXPERIMENTAL）；鏡腿按鍵與觸控板需 CXR-S CustomApp（未實作）。詳見 [GLASSES_CONTROL.md](GLASSES_CONTROL.md)。
+CXR-L 的 AI 鍵路線首次實機測試失敗；主要路線改為 CXR-S 眼鏡端 App（`RokidGlassesLink` 的 CUSTOM_APP 模式，與 CustomView 二選一），尚未實機驗證。詳見 [GLASSES_CONTROL.md](GLASSES_CONTROL.md)。
 
 ### 5.5 安全
 

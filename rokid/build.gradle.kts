@@ -25,6 +25,7 @@ android {
 
 dependencies {
     api(project(":domain"))
+    implementation(project(":glassesproto"))
     implementation(libs.kotlinx.coroutines.android)
     // Rokid CXR-L phone-side SDK. Pulls com.rokid.cxr:cxr-service-bridge (snapshot coordinate,
     // see docs/SDK_RESEARCH.md §6) which ships the native libs (arm64-v8a / armeabi-v7a only).

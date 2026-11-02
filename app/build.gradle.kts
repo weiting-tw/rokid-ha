@@ -67,6 +67,19 @@ android {
     buildFeatures { compose = true }
 }
 
+// The glasses CustomApp (CXR-S) is bundled as an asset; the phone installs it on the glasses
+// through the Rokid app (CXR-L appUploadAndInstall) — no ADB needed. Always the debug variant,
+// signed with the fixed debug key when ROKIDHA_DEBUG_KEYSTORE_FILE is set.
+val glassesApkDir = layout.buildDirectory.dir("generated/glassesApk")
+val bundleGlassesApk = tasks.register<Copy>("bundleGlassesApk") {
+    dependsOn(":glassesapp:assembleDebug")
+    from(rootProject.file("glassesapp/build/outputs/apk/debug/glassesapp-debug.apk"))
+    into(glassesApkDir.map { it.dir("glasses") })
+    rename { "rokid-ha-glasses.apk" }
+}
+android.sourceSets["main"].assets.srcDir(glassesApkDir)
+tasks.named("preBuild") { dependsOn(bundleGlassesApk) }
+
 dependencies {
     implementation(project(":rokid"))
     implementation(project(":domain"))

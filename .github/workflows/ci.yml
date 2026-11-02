@@ -84,20 +84,26 @@ jobs:
       - name: Compile check against client-l 1.0.3
         run: ./gradlew --stacktrace :rokid:compileDebugKotlin -Prokid.cxrl.version=1.0.3
 
-      - name: Rename APK
+      - name: Rename APKs
         id: apk
         run: |
           name="rokid-ha-debug-${GITHUB_SHA::7}.apk"
+          glasses="rokid-ha-glasses-debug-${GITHUB_SHA::7}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$name"
-          sha256sum "$name" | tee "$name.sha256"
+          cp glassesapp/build/outputs/apk/debug/glassesapp-debug.apk "$glasses"
+          sha256sum "$name" "$glasses" | tee "$name.sha256"
           echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "glasses=$glasses" >> "$GITHUB_OUTPUT"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: rokid-ha-debug-apk
+          # The phone APK already contains the glasses APK (installed on the glasses from the app);
+          # the separate glasses APK is for manual installation via ADB if needed.
           path: |
             ${{ steps.apk.outputs.name }}
+            ${{ steps.apk.outputs.glasses }}
             ${{ steps.apk.outputs.name }}.sha256
           retention-days: 14
           if-no-files-found: error

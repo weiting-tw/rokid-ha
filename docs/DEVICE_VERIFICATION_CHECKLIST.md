@@ -87,6 +87,27 @@ Glasses 分頁 → 開啟「Use glasses AI key as input」；「Glasses target�
 
 結果分類：F-2/F-3 通過才能把「AI key 控制」標為 VERIFIED；否則依 docs/GLASSES_CONTROL.md §4 評估 CXR-S。
 
+## G. 眼鏡端 App（CXR-S CustomApp）控制（2026-11-02 新增）
+
+前提：手機已設定 HA；Entities 分頁已勾選一盞測試燈並加入 quick action「Off」「On」。
+
+| 步驟 | 操作 | 預期 | 結果 |
+| --- | --- | --- | --- |
+| G-1 | Glasses 分頁 → Glasses mode 選「Glasses app (CXR-S)」→ Disconnect glasses → Connect glasses | Rokid link 變成 LINK_READY；卡片顯示「Glasses app: not installed」或「installed」 | ☐ |
+| G-2 | 按「Install glasses app」 | Log：`cb: onInstallAppResult(true)` → `cb: onOpenAppResult(true)`；眼鏡上出現 Rokid HA Glasses 畫面 | ☐ |
+| G-2a | 若安裝失敗 | 記錄 log 的 `onInstallAppResult(false)` 與 Rokid App 是否有提示（可能需在 Rokid App 允許安裝第三方應用） | |
+| G-3 | 開啟「Allow glasses input to control Home Assistant」 | 眼鏡顯示 HOME dashboard，目標實體前有 `>` | ☐ |
+| G-4 | 在眼鏡上**單擊鏡腿按鍵** | 手機「Last glasses input」顯示 `SPRITE_BUTTON_CLICK → SELECT`；眼鏡顯示 `Confirm Off … Press again` | ☐ |
+| G-5 | 5 秒內再單擊一次 | 燈關掉；眼鏡顯示 `OK: <燈> is OFF`（來自 HA 狀態） | ☐ |
+| G-6 | 雙指向前 / 向後滑 | 「Last glasses input」顯示 `TWO_FINGER_SWIPE_FORWARD → NEXT` 等；`>` 移到下一個目標 | ☐ |
+| G-7 | 長按鏡腿按鍵 | `SPRITE_BUTTON_LONG_PRESS → BACK`；取消 armed | ☐ |
+| G-8 | 單指滑動、單指點擊觸控板 | 記錄「Last glasses input」顯示什麼（若無任何顯示＝不會轉給 App） | |
+| G-9 | 雙擊鏡腿按鍵 | 系統退出眼鏡 App；手機顯示 view open = false；不會自動重開；按「Open on glasses」可回來 | ☐ |
+| G-10 | 關閉手機藍牙或 Rokid App | 眼鏡端顯示 `PHONE DISCONNECTED`，不保留舊數值為「目前」 | ☐ |
+| G-11 | HA 端改變燈的狀態 | 眼鏡畫面跟著更新 | ☐ |
+
+G-4、G-5 通過才能把「眼鏡按鍵控制」標為 VERIFIED。
+
 ## E. 完成條件
 
 P0 完成 = §B 全部通過、§1 的 #2–#10 在 SDK_COMPATIBILITY.md 中改為 VERIFIED，並附上報告檔。
