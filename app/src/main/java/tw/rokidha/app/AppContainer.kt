@@ -116,18 +116,20 @@ class AppContainer(private val app: Application) {
             glasses.sessionMode = v
         }
 
-    /** Copies the bundled glasses APK to private storage and installs it on the glasses (CUSTOM_APP mode). */
-    fun installGlassesApp(): Boolean {
-        val dir = java.io.File(app.filesDir, "glasses").apply { mkdirs() }
-        val apk = java.io.File(dir, "rokid-ha-glasses.apk")
-        val copied = runCatching {
-            app.assets.open("glasses/rokid-ha-glasses.apk").use { input -> apk.outputStream().use { input.copyTo(it) } }
+    /** Copies the bundled glasses APK to private storage (off the main thread) and installs it (CUSTOM_APP mode). */
+    fun installGlassesApp() {
+        scope.launch(Dispatchers.IO) {
+            val dir = java.io.File(app.filesDir, "glasses").apply { mkdirs() }
+            val apk = java.io.File(dir, "rokid-ha-glasses.apk")
+            val copied = runCatching {
+                app.assets.open("glasses/rokid-ha-glasses.apk").use { input -> apk.outputStream().use { input.copyTo(it) } }
+            }
+            if (copied.isFailure) {
+                glasses.reportInstallFailure("bundled glasses APK missing in this build: ${copied.exceptionOrNull()?.message}")
+                return@launch
+            }
+            glasses.installGlassesApp(apk)
         }
-        if (copied.isFailure) {
-            eventLog.add("app: bundled glasses APK missing: ${copied.exceptionOrNull()?.message}")
-            return false
-        }
-        return glasses.installGlassesApp(apk)
     }
 
     /** Undocumented `setInterruptAiWake`: ask the Rokid app not to handle the AI key itself. */

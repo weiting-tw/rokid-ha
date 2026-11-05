@@ -108,6 +108,22 @@ class RokidGlassesLink(
     /** CUSTOM_APP: result of `appIsInstalled` (null = unknown). */
     val glassesAppInstalled: StateFlow<Boolean?> = _glassesAppInstalled.asStateFlow()
 
+    /** Progress of installing the glasses app (the phone shows it; the SDK itself gives no progress). */
+    sealed interface InstallState {
+        data object Idle : InstallState
+        data class Transferring(val bytes: Long, val startedAtMs: Long) : InstallState
+        data object Installed : InstallState
+        data class Failed(val reason: String) : InstallState
+    }
+
+    private val _installState = MutableStateFlow<InstallState>(InstallState.Idle)
+    val installState: StateFlow<InstallState> = _installState.asStateFlow()
+
+    fun reportInstallFailure(reason: String) {
+        _installState.value = InstallState.Failed(reason)
+        log("app: install failed: $reason")
+    }
+
     private val _lastGlassesEvent = MutableStateFlow<String?>(null)
     /** CUSTOM_APP: last raw input name reported by the glasses app (diagnostics for verification). */
     val lastGlassesEvent: StateFlow<String?> = _lastGlassesEvent.asStateFlow()
@@ -428,12 +444,15 @@ class RokidGlassesLink(
      * process and passes a file descriptor, so an app-private path works.
      */
     fun installGlassesApp(apk: File): Boolean {
-        val l = link ?: return failFalse("app: install rejected, not connected")
-        if (activeMode != SessionMode.CUSTOM_APP) return failFalse("app: install needs the CustomApp session mode")
-        if (!_state.value.linkReady) return failFalse("app: install rejected, link not ready")
-        if (!apk.isFile || !apk.canRead()) return failFalse("app: APK not readable: ${apk.name}")
-        log("app: appUploadAndInstall(${apk.name}, ${apk.length()} bytes)")
-        runCatching { l.appUploadAndInstall(apk.absolutePath, appCallback) }.onFailure { return failFalse("app: install threw ${it.message}") }
+        fun reject(reason: String): Boolean { reportInstallFailure(reason); return failFalse("app: $reason") }
+        val l = link ?: return reject("not connected to the Rokid app")
+        if (activeMode != SessionMode.CUSTOM_APP) return reject("switch Glasses mode to the glasses app and reconnect")
+        if (!_state.value.linkReady) return reject("glasses not connected (link not ready)")
+        if (_installState.value is InstallState.Transferring) return true // already running
+        if (!apk.isFile || !apk.canRead()) return reject("APK not readable: ${apk.name}")
+        log("app: appUploadAndInstall(${apk.name}, ${apk.length()} bytes) — transfer over the Rokid link can take a while")
+        _installState.value = InstallState.Transferring(apk.length(), System.currentTimeMillis())
+        runCatching { l.appUploadAndInstall(apk.absolutePath, appCallback) }.onFailure { return reject("install threw ${it.message}") }
         return true
     }
 
@@ -530,6 +549,7 @@ class RokidGlassesLink(
         currentScreen = null
         lastGlassesSeq.clear()
         _glassesAppInstalled.value = null
+        if (_installState.value is InstallState.Transferring) _installState.value = InstallState.Failed("connection reset during transfer")
     }
 
     private val appCallback = object : IGlassAppCbk {
@@ -542,9 +562,11 @@ class RokidGlassesLink(
         override fun onInstallAppResult(success: Boolean) {
             log("cb: onInstallAppResult($success)")
             if (success) {
+                _installState.value = InstallState.Installed
                 _glassesAppInstalled.value = true
                 openGlassesApp()
             } else {
+                reportInstallFailure("the Rokid app reported that installation failed")
                 fail("app: installation on the glasses failed")
             }
         }

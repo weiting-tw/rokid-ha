@@ -13,7 +13,7 @@ import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
+import android.os.Build
 import tw.rokidha.glassesproto.GlassesKeyMap
 import tw.rokidha.glassesproto.GlassesProtocol
 
@@ -61,11 +61,14 @@ class MainActivity : Activity() {
             onConnection = { c -> runOnUiThread { connected = c; render() } },
         )
         link.start()
-        ContextCompat.registerReceiver(
-            this, keyReceiver,
-            IntentFilter().apply { GlassesKeyMap.ACTIONS.forEach(::addAction) },
-            ContextCompat.RECEIVER_EXPORTED, // sent by the glasses system, i.e. another app
-        )
+        val filter = IntentFilter().apply { GlassesKeyMap.ACTIONS.forEach(::addAction) }
+        // Broadcasts come from the glasses system (another app), so the receiver must be exported.
+        // The flag exists from Android 13; the glasses run Android 12, where it is not needed.
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(keyReceiver, filter, RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(keyReceiver, filter)
+        }
     }
 
     override fun onResume() {

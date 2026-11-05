@@ -35,6 +35,20 @@ android {
             }
         }
     }
+    buildTypes {
+        // The debug variant is the one bundled into the phone app and sent to the glasses over
+        // Bluetooth, so shrink it: R8 removes unused Kotlin/stdlib code (6.7 MB of dex unshrunk).
+        debug {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        release {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+    // Compress native libraries inside the APK: smaller transfer over Bluetooth.
+    packaging { jniLibs { useLegacyPackaging = true } }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -44,6 +58,5 @@ android {
 
 dependencies {
     implementation(project(":glassesproto"))
-    implementation(libs.androidx.core.ktx)
     implementation("com.rokid.cxr:cxr-service-bridge:$cxrsVersion")
 }

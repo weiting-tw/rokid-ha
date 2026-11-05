@@ -120,6 +120,8 @@ class GlassesViewModel(app: Application) : AndroidViewModel(app) {
     fun setMode(m: RokidGlassesLink.SessionMode) { c.glassesMode = m; _mode.value = m }
     fun activeMode() = c.glasses.activeSessionMode
     val glassesAppInstalled = c.glasses.glassesAppInstalled
+    val installState = c.glasses.installState
+    val logLines = c.eventLog.lines
     val lastGlassesEvent = c.glasses.lastGlassesEvent
     fun installGlassesApp() { c.installGlassesApp() }
     fun openGlassesApp() { c.glasses.openGlassesApp() }
@@ -158,6 +160,15 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
     val mode by vm.mode.collectAsStateWithLifecycle()
     val installed by vm.glassesAppInstalled.collectAsStateWithLifecycle()
     val lastEvent by vm.lastGlassesEvent.collectAsStateWithLifecycle()
+    val install by vm.installState.collectAsStateWithLifecycle()
+    val logLines by vm.logLines.collectAsStateWithLifecycle()
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    androidx.compose.runtime.LaunchedEffect(install) {
+        while (install is RokidGlassesLink.InstallState.Transferring) {
+            nowMs = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
     val status by vm.commandStatus.collectAsStateWithLifecycle()
     val ents by vm.entities.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf<QuickAction?>(null) }
@@ -199,8 +210,25 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
                 Column(Modifier.padding(12.dp)) {
                     Text("Glasses app: " + when (installed) { true -> "installed"; false -> "not installed"; null -> "checking…" })
                     Text("Last glasses input: ${lastEvent ?: "none yet"}", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                    when (val st = install) {
+                        is RokidGlassesLink.InstallState.Transferring -> {
+                            val secs = (nowMs - st.startedAtMs).coerceAtLeast(0) / 1000
+                            Text("Installing: sending ${st.bytes / 1024} KB to the glasses through the Rokid app… ${secs}s", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Keep the glasses on and near the phone. This can take a minute or more. " +
+                                    if (secs > 180) "No answer from the Rokid app after 3 min — see the log below." else "",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        RokidGlassesLink.InstallState.Installed -> Text("Installed ✓ — starting it on the glasses")
+                        is RokidGlassesLink.InstallState.Failed -> Text("Install failed: ${st.reason}", color = MaterialTheme.colorScheme.error)
+                        RokidGlassesLink.InstallState.Idle -> Unit
+                    }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = vm::installGlassesApp) { Text(if (installed == true) "Reinstall glasses app" else "Install glasses app") }
+                        OutlinedButton(
+                            onClick = vm::installGlassesApp,
+                            enabled = install !is RokidGlassesLink.InstallState.Transferring,
+                        ) { Text(if (installed == true) "Reinstall glasses app" else "Install glasses app") }
                         OutlinedButton(onClick = vm::openGlassesApp, enabled = installed == true) { Text("Open on glasses") }
                     }
                 }
@@ -303,6 +331,14 @@ fun GlassesScreen(vm: GlassesViewModel = viewModel()) {
             vm.setAutoShow(false)
             context.startActivity(Intent(context, P0VerificationActivity::class.java))
         }) { Text("SDK diagnostics (P0)") }
+
+        Text("Recent log (newest first)", fontWeight = FontWeight.Bold)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(8.dp)) {
+                logLines.takeLast(15).asReversed().forEach { Text(it, fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
+                if (logLines.isEmpty()) Text("(empty)")
+            }
+        }
     }
 
     confirm?.let { a ->
