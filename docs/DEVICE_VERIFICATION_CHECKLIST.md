@@ -95,7 +95,8 @@ Glasses 分頁 → 開啟「Use glasses AI key as input」；「Glasses target�
 | --- | --- | --- | --- |
 | G-1 | Glasses 分頁 → Glasses mode 選「Glasses app (CXR-S)」→ Disconnect glasses → Connect glasses | Rokid link 變成 LINK_READY；卡片顯示「Glasses app: not installed」或「installed」 | ☐ |
 | G-2 | 按「Install glasses app」 | Log：`cb: onInstallAppResult(true)` → `cb: onOpenAppResult(true)`；眼鏡上出現 Rokid HA Glasses 畫面 | ☐ |
-| G-2a | 若安裝失敗 | 記錄 log 的 `onInstallAppResult(false)` 與 Rokid App 是否有提示（可能需在 Rokid App 允許安裝第三方應用） | |
+| G-2a | 若安裝失敗 | 記錄失敗訊息中的秒數（立即失敗或傳一段時間後失敗）與 Recent log | |
+| G-2b | 失敗後依序檢查 | ① 手機 Wi-Fi 開啟（社群資料：Rokid App 透過眼鏡熱點 Wi-Fi Direct 傳 APK，EXPERIMENTAL）② Rokid AI App → 設備 → 右上齒輪 → 開發者 → 眼鏡ADB調試 開啟（官方文件 CXR-S 開發環境要求）③ Rokid App 為最新版 ④ 眼鏡電量充足並靠近手機；每改一項重試一次並記錄 | |
 | G-3 | 開啟「Allow glasses input to control Home Assistant」 | 眼鏡顯示 HOME dashboard，目標實體前有 `>` | ☐ |
 | G-4 | 在眼鏡上**單擊鏡腿按鍵** | 手機「Last glasses input」顯示 `SPRITE_BUTTON_CLICK → SELECT`；眼鏡顯示 `Confirm Off … Press again` | ☐ |
 | G-5 | 5 秒內再單擊一次 | 燈關掉；眼鏡顯示 `OK: <燈> is OFF`（來自 HA 狀態） | ☐ |

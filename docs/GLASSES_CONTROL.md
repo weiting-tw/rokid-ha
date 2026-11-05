@@ -219,3 +219,16 @@ unknown kinds, other versions, oversized frames, key mapping) and
 Limitations: CustomView and CustomApp cannot be used in the same session; switching modes needs a
 reconnect. Developing the glasses app further without ADB is possible through the phone installer,
 but reading glasses-side logs needs ADB (Rokid app → developer options) and the dev cable.
+
+### 9.1 First install attempt (2026-11-05, user report)
+
+`appUploadAndInstall` → `onInstallAppResult(false)`; the SDK gives no reason code and no progress
+callback (verified in client-l 1.0.4 and 1.1.2 interfaces). Candidate causes, in order of evidence:
+
+| Cause | Evidence |
+| --- | --- |
+| Phone Wi-Fi off — the Rokid app transfers the APK over the glasses' Wi-Fi hotspot | EXPERIMENTAL: community project [Anezium/Rokid-APKs](https://github.com/Anezium/Rokid-APKs) ("requires phone Wi-Fi to be enabled during install") |
+| Glasses ADB debugging off (Rokid AI App → Device → Settings → Developer) | DOCUMENTED that CXR-S development needs it; its warning mentions installing unknown apps; not documented as an install prerequisite |
+| Rokid app version / firmware does not allow third-party installs | UNKNOWN |
+
+The app now checks phone Wi-Fi before installing and shows the elapsed time and this checklist on failure.

@@ -566,7 +566,12 @@ class RokidGlassesLink(
                 _glassesAppInstalled.value = true
                 openGlassesApp()
             } else {
-                reportInstallFailure("the Rokid app reported that installation failed")
+                val t = (_installState.value as? InstallState.Transferring)?.let { (System.currentTimeMillis() - it.startedAtMs) / 1000 }
+                reportInstallFailure(
+                    "the Rokid app reported that installation failed" + (t?.let { " after ${it}s" } ?: "") +
+                        ". Check: phone Wi-Fi on; Rokid app → Device → Settings → Developer → glasses ADB debugging on; " +
+                        "glasses charged and near the phone; Rokid app up to date",
+                )
                 fail("app: installation on the glasses failed")
             }
         }

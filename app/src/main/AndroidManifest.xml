@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Reconnect when the network comes back. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Read-only check that phone Wi-Fi is on before installing the glasses app (the Rokid app
+         transfers the APK over the glasses' Wi-Fi hotspot). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Optional "keep connected" foreground service (glasses = connected device). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />

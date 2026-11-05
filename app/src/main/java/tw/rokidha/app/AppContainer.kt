@@ -119,6 +119,13 @@ class AppContainer(private val app: Application) {
     /** Copies the bundled glasses APK to private storage (off the main thread) and installs it (CUSTOM_APP mode). */
     fun installGlassesApp() {
         scope.launch(Dispatchers.IO) {
+            // Community finding (Anezium/Rokid-APKs, EXPERIMENTAL): CXR-L installs need phone Wi-Fi
+            // on, because the Rokid app joins the glasses' hotspot to transfer the APK.
+            val wifi = app.getSystemService(android.net.wifi.WifiManager::class.java)
+            if (wifi != null && !wifi.isWifiEnabled) {
+                glasses.reportInstallFailure("phone Wi-Fi is off — turn Wi-Fi on (no network needed); the Rokid app sends the APK over the glasses' Wi-Fi hotspot")
+                return@launch
+            }
             val dir = java.io.File(app.filesDir, "glasses").apply { mkdirs() }
             val apk = java.io.File(dir, "rokid-ha-glasses.apk")
             val copied = runCatching {
